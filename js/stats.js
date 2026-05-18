@@ -2,13 +2,11 @@
 // stats.js — Calculs (1RM, volume hebdo, PR, stagnation) + graphiques Chart.js
 // ============================================================================
 
-// Formule Epley : 1RM = charge × (1 + reps/30)
 function estimate1RM(weight, reps) {
   if (reps <= 0) return 0;
   return weight * (1 + reps / 30);
 }
 
-// Map muscle interne → libellé FR (pour graphiques volume)
 const MUSCLE_LABELS = {
   pectorals: 'Pecs', front_delts: 'Delt. ant.', side_delts: 'Delt. lat.',
   rear_delts: 'Delt. arr.', triceps: 'Triceps', biceps: 'Biceps',
@@ -18,7 +16,7 @@ const MUSCLE_LABELS = {
   glutes: 'Fessiers', calves: 'Mollets',
 };
 
-// Trouve un exercice par ID dans le programme
+// Cherche dans les sessions pré-chargées (synchrone, pour les calculs)
 function findExercise(exerciseId) {
   for (const session of Object.values(Program.SESSIONS)) {
     const ex = session.exercises.find(e => e.id === exerciseId);
@@ -27,7 +25,18 @@ function findExercise(exerciseId) {
   return null;
 }
 
-// ID exos clés pour suivi 1RM
+// Cherche aussi dans les sessions custom (asynchrone)
+async function findExerciseAsync(exerciseId) {
+  const sync = findExercise(exerciseId);
+  if (sync) return sync;
+  const customs = await DB.getAll('custom_sessions');
+  for (const session of customs) {
+    const ex = session.exercises.find(e => e.id === exerciseId);
+    if (ex) return ex;
+  }
+  return null;
+}
+
 const KEY_EXERCISES = [
   { id: 'bench_press', label: 'Bench press' },
   { id: 'back_squat', label: 'Back squat' },
@@ -35,14 +44,12 @@ const KEY_EXERCISES = [
   { id: 'db_ohp_seated', label: 'OHP haltères' },
 ];
 
-// ---- Calculs ----
 async function getAll1RMSeries() {
   const sets = await DB.getAll('sets');
   const out = {};
   for (const ex of KEY_EXERCISES) {
     const exSets = sets.filter(s => s.exerciseId === ex.id);
     if (!exSets.length) { out[ex.id] = { label: ex.label, points: [] }; continue; }
-    // Pour chaque date, on prend l'estimation 1RM max du jour
     const byDate = {};
     for (const s of exSets) {
       const d = s.date.slice(0, 10);
@@ -66,8 +73,6 @@ async function getPRTable() {
   }
   const rows = [];
   for (const [exId, exSets] of Object.entries(exMap)) {
-    const ex = findExercise(exId);
-    if (!ex) continue;
     let best = null;
     for (const s of exSets) {
       const v = estimate1RM(s.weight, s.reps);
@@ -75,9 +80,10 @@ async function getPRTable() {
         best = { ...s, estimate: v };
       }
     }
+    const name = best.exerciseName || exId;
     rows.push({
       exerciseId: exId,
-      name: ex.name,
+      name,
       bestWeight: best.weight,
       bestReps: best.reps,
       estimate1RM: Math.round(best.estimate * 10) / 10,
@@ -88,18 +94,16 @@ async function getPRTable() {
   return rows;
 }
 
-// Volume hebdomadaire par muscle (sets effectifs/semaine)
 async function getWeeklyVolumeByMuscle() {
   const sets = await DB.getAll('sets');
   if (!sets.length) return { weeks: [], muscles: {} };
-  // Bucket par semaine (lundi comme début)
   const byWeek = {};
   for (const s of sets) {
     const d = new Date(s.date);
     const monday = getMonday(d);
     const key = monday.toISOString().slice(0, 10);
-    const ex = findExercise(s.exerciseId);
-    if (!ex) continue;
+    const ex = await findExerciseAsync(s.exerciseId);
+    if (!ex || !ex.muscles || !ex.muscles.length) continue;
     if (!byWeek[key]) byWeek[key] = {};
     for (const m of ex.muscles) {
       byWeek[key][m] = (byWeek[key][m] || 0) + 1;
@@ -123,7 +127,6 @@ function getMonday(d) {
   return x;
 }
 
-// Volume total par séance dans le temps
 async function getWorkoutVolumeSeries() {
   const workouts = await DB.getAll('workouts');
   return workouts
@@ -132,7 +135,6 @@ async function getWorkoutVolumeSeries() {
     .map(w => ({ x: w.date.slice(0, 10), y: Math.round(w.totalVolume) }));
 }
 
-// Détection stagnation : un exo sans progression 1RM depuis >3 semaines
 async function detectStagnation() {
   const sets = await DB.getAll('sets');
   const exMap = {};
@@ -144,7 +146,7 @@ async function detectStagnation() {
   const threeWeeksMs = 21 * 24 * 60 * 60 * 1000;
   const now = Date.now();
   for (const [exId, list] of Object.entries(exMap)) {
-    if (list.length < 6) continue; // pas assez de données
+    if (list.length < 6) continue;
     list.sort((a, b) => a.date.localeCompare(b.date));
     let bestEver = 0;
     let bestDate = list[0].date;
@@ -153,14 +155,13 @@ async function detectStagnation() {
       if (v > bestEver) { bestEver = v; bestDate = s.date; }
     }
     if (now - new Date(bestDate).getTime() > threeWeeksMs) {
-      const ex = findExercise(exId);
-      if (ex) stagnant.push({ exerciseId: exId, name: ex.name, since: bestDate.slice(0, 10) });
+      const name = list[0].exerciseName || exId;
+      stagnant.push({ exerciseId: exId, name, since: bestDate.slice(0, 10) });
     }
   }
   return stagnant;
 }
 
-// Mensurations & sommeil & poids
 async function getMeasurementSeries(field) {
   const items = await DB.getAll('measurements');
   return items
@@ -169,7 +170,6 @@ async function getMeasurementSeries(field) {
     .map(m => ({ x: m.date.slice(0, 10), y: parseFloat(m[field]) }));
 }
 
-// Moyenne mobile 7 jours sur poids corporel
 function movingAverage(points, window = 7) {
   return points.map((_, i) => {
     const slice = points.slice(Math.max(0, i - window + 1), i + 1);
@@ -183,6 +183,7 @@ window.Stats = {
   KEY_EXERCISES,
   MUSCLE_LABELS,
   findExercise,
+  findExerciseAsync,
   getAll1RMSeries,
   getPRTable,
   getWeeklyVolumeByMuscle,

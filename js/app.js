@@ -3,26 +3,17 @@
 // ============================================================================
 
 const App = (() => {
-  let charts = {}; // référence aux instances Chart.js pour destruction propre
+  let charts = {};
 
-  // ---- Init ----
   async function init() {
-    // Date de démarrage du programme
-    let startDate = await DB.getSetting('startDate');
-    if (!startDate) {
-      startDate = Date.now();
-      await DB.setSetting('startDate', startDate);
-    }
-    // Theme
     const theme = await DB.getSetting('theme', 'dark');
     document.documentElement.dataset.theme = theme;
-    // Units
     const units = await DB.getSetting('units', 'metric');
     document.documentElement.dataset.units = units;
 
     bindTabs();
     bindGlobal();
-    await refreshAll();
+    await renderSessions();
     registerServiceWorker();
     requestNotificationPermission();
   }
@@ -38,188 +29,347 @@ const App = (() => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('screen-' + name).classList.add('active');
     document.querySelector(`.tab-btn[data-screen="${name}"]`).classList.add('active');
+    if (name === 'sessions') renderSessions();
+    if (name === 'history') renderHistory();
     if (name === 'stats') renderStats();
     if (name === 'measurements') renderMeasurements();
-    if (name === 'program') renderProgramView();
     if (name === 'settings') renderSettings();
   }
 
   function bindGlobal() {
-    // Modal finish (séance terminée)
     document.getElementById('finish-confirm').addEventListener('click', async () => {
-      const sensation = parseInt(document.getElementById('finish-sensation').value, 10) || 7;
       const note = document.getElementById('finish-note').value;
-      await Workout.finishSession(sensation, note);
+      await Workout.finishSession(note);
       document.getElementById('finish-modal').classList.remove('open');
       document.getElementById('finish-note').value = '';
-      switchTab('today');
+      switchTab('history');
     });
     document.getElementById('finish-cancel').addEventListener('click', () => {
       document.getElementById('finish-modal').classList.remove('open');
     });
-    // Modal timer
     document.getElementById('timer-skip').addEventListener('click', () => Workout.cancelTimer());
     document.getElementById('timer-plus').addEventListener('click', () => Workout.adjustTimer(15));
     document.getElementById('timer-minus').addEventListener('click', () => Workout.adjustTimer(-15));
-    // Modal workout — abort
     document.getElementById('workout-abort').addEventListener('click', async () => {
-      if (confirm('Quitter la séance ? Les sets validés restent enregistrés.')) {
-        await Workout.abortSession();
+      if (Workout.isActive()) {
+        if (confirm('Quitter la séance ? Les sets validés restent enregistrés.')) {
+          await Workout.abortSession();
+        }
+      } else {
+        document.getElementById('workout-modal').classList.remove('open');
       }
     });
   }
 
-  // ---- Aujourd'hui ----
-  async function refreshAll() {
-    await renderToday();
-  }
+  // ---- Séances (choix + création) ----
+  async function renderSessions() {
+    const root = document.getElementById('screen-sessions');
+    const allSessions = await Program.getAllSessions();
 
-  async function renderToday() {
-    const root = document.getElementById('screen-today');
-    const sessionId = Program.getTodaySessionId();
-    const startDate = await DB.getSetting('startDate');
-    const week = Program.getCurrentWeek(startDate);
-    const phase = Program.getCurrentPhase(startDate);
-    const dayNames = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
-    const today = dayNames[new Date().getDay()];
+    let html = '<h1 class="screen-title">Séances</h1>';
+    html += '<p class="muted small">Choisis une séance à lancer ou crée la tienne.</p>';
 
-    let body = '';
-    if (sessionId === 'rest') {
-      body = `
-        <div class="card center">
-          <h2>Jour de repos 🛌</h2>
-          <p class="muted">${capitalize(today)} — pas de séance prévue.</p>
-          <p>Optionnel : <strong>20-30 min de cardio LISS</strong> (marche rapide, vélo modéré).
-             Ne dégrade pas la récupération musculaire.</p>
-          <button class="btn btn-ghost" id="manual-session">Faire une autre séance</button>
-        </div>
-      `;
-    } else {
-      const session = Program.SESSIONS[sessionId];
-      const restAvg = avgRest(session.exercises);
-      const rirAvg = avgRir(session.exercises);
-      const deloadNote = phase.deload
-        ? `<div class="banner banner-warning">⚠️ <strong>Semaine deload</strong> — charges
-            automatiquement réduites à ~60%, sets réduits, intensité maintenue.</div>` : '';
-      const checkpointNote = phase.checkpoint
-        ? `<div class="banner banner-info">📏 Checkpoint cette semaine : pense à mettre à jour tes mensurations.</div>` : '';
-      body = `
-        <div class="card">
-          <p class="muted small">${capitalize(today)} · Semaine ${week} / 12 · ${phase.name}</p>
-          ${deloadNote}
-          ${checkpointNote}
-          <h2>${session.name}</h2>
-          <p class="muted">${session.focus}</p>
+    // Séances pré-enregistrées
+    for (const [sid, session] of Object.entries(allSessions)) {
+      const isCustom = sid.startsWith('custom_');
+      const exCount = session.exercises.length;
+      const avgRest = Math.round(session.exercises.reduce((a, e) => a + e.rest, 0) / exCount);
+      const restLabel = avgRest >= 60 ? Math.round(avgRest / 60) + ' min' : avgRest + 's';
+      html += `
+        <div class="card session-card" data-session="${sid}">
+          <div class="session-card-head">
+            <div>
+              <h2>${session.name}</h2>
+              <p class="muted small">${session.focus || ''}</p>
+            </div>
+            ${isCustom ? `<button class="btn btn-tiny btn-ghost session-delete" data-sid="${sid}" title="Supprimer">🗑️</button>` : ''}
+          </div>
           <div class="today-meta">
-            <span><strong>${session.exercises.length}</strong> exercices</span>
-            <span>RIR cible moyen <strong>${rirAvg}</strong></span>
-            <span>Repos moyen <strong>${restAvg}</strong></span>
+            <span><strong>${exCount}</strong> exercices</span>
+            <span>Repos moyen <strong>${restLabel}</strong></span>
           </div>
-          <button class="btn btn-primary btn-block" id="start-session-btn">Commencer la séance</button>
+          <button class="btn btn-primary btn-block session-start" data-sid="${sid}">Commencer</button>
         </div>
       `;
     }
 
-    // Stagnation alert
-    const stagnant = await Stats.detectStagnation();
-    let stagnantHtml = '';
-    if (stagnant.length) {
-      stagnantHtml = `
-        <div class="card warning">
-          <h3>⚠️ Stagnation détectée</h3>
-          <ul>${stagnant.map(s => `<li>${s.name} — pas de progression depuis ${s.since}</li>`).join('')}</ul>
-          <p class="small muted">Envisage : changer de variation, réduire le volume du muscle d'1 set, ou vérifier ton sommeil.</p>
-        </div>
-      `;
-    }
+    // Bouton créer séance custom
+    html += `
+      <button class="btn btn-ghost btn-block" id="create-session-btn" style="margin-top:8px;">
+        + Créer une séance
+      </button>
+    `;
 
-    root.innerHTML = `<h1 class="screen-title">Aujourd'hui</h1>${body}${stagnantHtml}`;
-
-    const startBtn = document.getElementById('start-session-btn');
-    if (startBtn) startBtn.addEventListener('click', () => Workout.startSession(sessionId));
-    const manualBtn = document.getElementById('manual-session');
-    if (manualBtn) manualBtn.addEventListener('click', () => promptManualSession());
-  }
-
-  function promptManualSession() {
-    const ids = Object.keys(Program.SESSIONS);
-    const labels = ids.map(id => Program.SESSIONS[id].name);
-    const choice = prompt(
-      'Quelle séance ?\n' + ids.map((id, i) => `${i + 1}. ${labels[i]}`).join('\n'),
-      '1'
-    );
-    const idx = parseInt(choice, 10) - 1;
-    if (ids[idx]) Workout.startSession(ids[idx]);
-  }
-
-  function avgRest(exs) {
-    const a = Math.round(exs.reduce((x, e) => x + e.rest, 0) / exs.length);
-    return a >= 60 ? Math.round(a / 60) + ' min' : a + 's';
-  }
-  function avgRir(exs) {
-    return (exs.reduce((x, e) => x + e.rir, 0) / exs.length).toFixed(1);
-  }
-  function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
-
-  // ---- Programme (vue d'ensemble + édition) ----
-  async function renderProgramView() {
-    const root = document.getElementById('screen-program');
-    const overrides = await DB.getAll('program_overrides');
-    const ovMap = Object.fromEntries(overrides.map(o => [o.exerciseId, o]));
-    let html = `<h1 class="screen-title">Programme</h1>
-      <p class="muted">Lecture seule par défaut. Active "Modifier" pour personnaliser.</p>
-      <label class="toggle-row">
-        <input type="checkbox" id="edit-mode"> Modifier
-      </label>`;
-
-    for (const sid of ['upper_a', 'lower_a', 'upper_b', 'lower_b']) {
-      const session = Program.SESSIONS[sid];
-      html += `<section class="card">
-        <h2>${session.name}</h2>
-        <p class="muted small">${session.focus}</p>
-        <ol class="exercise-summary">`;
-      for (const ex of session.exercises) {
-        const ov = ovMap[ex.id] || {};
-        const repsTarget = ex.isTime ? `${ex.repsMin}-${ex.repsMax}s` : `${ex.repsMin}-${ex.repsMax}`;
-        html += `<li data-ex="${ex.id}">
-          <div class="ex-line">
-            <span class="ex-name">${ov.name ?? ex.name}${ex.perSide ? ' (par côté)' : ''}</span>
-            <span class="ex-prescription">${ex.sets}×${repsTarget}</span>
-          </div>
-          <div class="ex-detail muted small">RIR <span class="rir-val">${ov.rir ?? ex.rir}</span>
-            · Repos <span class="rest-val">${ov.rest ?? ex.rest}</span>s${ex.ezBarOnly ? ' · ⚠️ EZ uniquement' : ''}</div>
-          <div class="ex-edit hidden">
-            <label>Nom <input type="text" class="ex-edit-name" value="${ov.name ?? ex.name}"></label>
-            <label>RIR <input type="number" class="ex-edit-rir" value="${ov.rir ?? ex.rir}" min="0" max="5"></label>
-            <label>Repos (s) <input type="number" class="ex-edit-rest" value="${ov.rest ?? ex.rest}" min="0"></label>
-            <button class="btn btn-small ex-save">Enregistrer</button>
-            <button class="btn btn-small btn-ghost ex-reset">Réinitialiser</button>
-          </div>
-        </li>`;
-      }
-      html += `</ol></section>`;
-    }
     root.innerHTML = html;
 
-    const editToggle = document.getElementById('edit-mode');
-    editToggle.addEventListener('change', () => {
-      root.querySelectorAll('.ex-edit').forEach(el => el.classList.toggle('hidden', !editToggle.checked));
+    root.querySelectorAll('.session-start').forEach(btn => {
+      btn.addEventListener('click', () => Workout.startSession(btn.dataset.sid));
+    });
+    root.querySelectorAll('.session-delete').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (confirm('Supprimer cette séance custom ?')) {
+          await Program.deleteCustomSession(btn.dataset.sid);
+          renderSessions();
+        }
+      });
+    });
+    document.getElementById('create-session-btn').addEventListener('click', () => openCreateSession());
+  }
+
+  function openCreateSession() {
+    const modal = document.getElementById('workout-modal');
+    const root = document.getElementById('workout-content');
+    root.innerHTML = `
+      <h2>Nouvelle séance</h2>
+      <form id="create-session-form" class="create-form">
+        <label>Nom de la séance
+          <input type="text" id="cs-name" required placeholder="Ex: Push Day">
+        </label>
+        <label>Description courte
+          <input type="text" id="cs-focus" placeholder="Ex: Pecs, épaules, triceps">
+        </label>
+        <h3>Exercices</h3>
+        <div id="cs-exercises"></div>
+        <button type="button" class="btn btn-ghost btn-block" id="cs-add-exercise">+ Ajouter un exercice</button>
+        <div style="margin-top:16px; display:flex; gap:10px;">
+          <button type="button" class="btn btn-ghost" id="cs-cancel" style="flex:1;">Annuler</button>
+          <button type="submit" class="btn btn-primary" style="flex:1;">Enregistrer</button>
+        </div>
+      </form>
+    `;
+    modal.classList.add('open');
+
+    let exerciseCount = 0;
+
+    function addExerciseRow() {
+      const idx = exerciseCount++;
+      const div = document.createElement('div');
+      div.className = 'cs-exercise-row';
+      div.innerHTML = `
+        <div class="cs-exercise-header">
+          <strong>Exercice ${idx + 1}</strong>
+          <button type="button" class="btn btn-tiny btn-ghost cs-remove-ex">✕</button>
+        </div>
+        <label>Nom <input type="text" class="cs-ex-name" required placeholder="Ex: Développé couché"></label>
+        <div class="cs-row-grid">
+          <label>Séries <input type="number" class="cs-ex-sets" value="3" min="1" inputmode="numeric"></label>
+          <label>Reps min <input type="number" class="cs-ex-rmin" value="8" min="1" inputmode="numeric"></label>
+          <label>Reps max <input type="number" class="cs-ex-rmax" value="12" min="1" inputmode="numeric"></label>
+          <label>Repos (s) <input type="number" class="cs-ex-rest" value="120" min="0" inputmode="numeric"></label>
+        </div>
+        <label>Note technique <input type="text" class="cs-ex-note" placeholder="Optionnel"></label>
+      `;
+      div.querySelector('.cs-remove-ex').addEventListener('click', () => div.remove());
+      document.getElementById('cs-exercises').appendChild(div);
+    }
+
+    addExerciseRow();
+
+    document.getElementById('cs-add-exercise').addEventListener('click', addExerciseRow);
+    document.getElementById('cs-cancel').addEventListener('click', () => {
+      modal.classList.remove('open');
+      renderSessions();
     });
 
-    root.querySelectorAll('li[data-ex]').forEach(li => {
-      const exId = li.dataset.ex;
-      li.querySelector('.ex-save').addEventListener('click', async () => {
-        const name = li.querySelector('.ex-edit-name').value.trim();
-        const rir = parseInt(li.querySelector('.ex-edit-rir').value, 10);
-        const rest = parseInt(li.querySelector('.ex-edit-rest').value, 10);
-        await DB.put('program_overrides', { exerciseId: exId, name, rir, rest });
-        renderProgramView();
+    document.getElementById('create-session-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('cs-name').value.trim();
+      const focus = document.getElementById('cs-focus').value.trim();
+      if (!name) return;
+
+      const exerciseRows = document.querySelectorAll('.cs-exercise-row');
+      const exercises = [];
+      exerciseRows.forEach((row, i) => {
+        const exName = row.querySelector('.cs-ex-name').value.trim();
+        if (!exName) return;
+        exercises.push({
+          id: Program.generateId() + '_ex' + i,
+          name: exName,
+          sets: parseInt(row.querySelector('.cs-ex-sets').value) || 3,
+          repsMin: parseInt(row.querySelector('.cs-ex-rmin').value) || 8,
+          repsMax: parseInt(row.querySelector('.cs-ex-rmax').value) || 12,
+          rest: parseInt(row.querySelector('.cs-ex-rest').value) || 120,
+          muscles: [],
+          note: row.querySelector('.cs-ex-note').value.trim(),
+          isCompound: false,
+        });
       });
-      li.querySelector('.ex-reset').addEventListener('click', async () => {
-        await DB.del('program_overrides', exId);
-        renderProgramView();
+
+      if (!exercises.length) { alert('Ajoute au moins un exercice.'); return; }
+
+      const session = {
+        id: Program.generateId(),
+        name,
+        focus,
+        exercises,
+      };
+
+      await Program.saveCustomSession(session);
+      modal.classList.remove('open');
+      renderSessions();
+    });
+  }
+
+  // ---- Historique des séances ----
+  async function renderHistory() {
+    const root = document.getElementById('screen-history');
+    const workouts = (await DB.getAll('workouts'))
+      .filter(w => w.finished)
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    let html = '<h1 class="screen-title">Historique</h1>';
+
+    if (!workouts.length) {
+      html += '<p class="muted">Aucune séance enregistrée.</p>';
+      root.innerHTML = html;
+      return;
+    }
+
+    for (const w of workouts) {
+      const d = w.date.slice(0, 10);
+      const vol = w.totalVolume ? Math.round(w.totalVolume) + ' kg' : '—';
+      html += `
+        <div class="card history-card">
+          <div class="history-card-head">
+            <div>
+              <h3>${w.sessionName || w.sessionId}</h3>
+              <p class="muted small">${d} · ${w.totalSets || 0} sets · Volume ${vol}</p>
+            </div>
+            <div class="history-actions">
+              <button class="btn btn-tiny btn-ghost history-view" data-wid="${w.id}">Voir</button>
+              <button class="btn btn-tiny btn-ghost history-delete" data-wid="${w.id}">🗑️</button>
+            </div>
+          </div>
+          ${w.note ? `<p class="small muted">${w.note}</p>` : ''}
+        </div>
+      `;
+    }
+
+    root.innerHTML = html;
+
+    root.querySelectorAll('.history-view').forEach(btn => {
+      btn.addEventListener('click', () => openWorkoutDetail(parseInt(btn.dataset.wid)));
+    });
+    root.querySelectorAll('.history-delete').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (confirm('Supprimer cette séance et tous ses sets ?')) {
+          const wid = parseInt(btn.dataset.wid);
+          const sets = await DB.getByIndex('sets', 'workoutId', wid);
+          for (const s of sets) await DB.del('sets', s.id);
+          await DB.del('workouts', wid);
+          renderHistory();
+        }
       });
     });
+  }
+
+  async function openWorkoutDetail(workoutId) {
+    const workout = await DB.get('workouts', workoutId);
+    if (!workout) return;
+    const sets = (await DB.getByIndex('sets', 'workoutId', workoutId))
+      .sort((a, b) => {
+        if (a.exerciseId !== b.exerciseId) return a.date.localeCompare(b.date);
+        return a.setIndex - b.setIndex;
+      });
+
+    const modal = document.getElementById('workout-modal');
+    const root = document.getElementById('workout-content');
+
+    // Groupe les sets par exercice
+    const byExercise = {};
+    for (const s of sets) {
+      if (!byExercise[s.exerciseId]) byExercise[s.exerciseId] = { name: s.exerciseName, sets: [] };
+      byExercise[s.exerciseId].sets.push(s);
+    }
+
+    let html = `
+      <h2>${workout.sessionName || workout.sessionId}</h2>
+      <p class="muted">${workout.date.slice(0, 10)} · ${sets.length} sets · Volume ${workout.totalVolume ? Math.round(workout.totalVolume) + ' kg' : '—'}</p>
+    `;
+
+    for (const [exId, data] of Object.entries(byExercise)) {
+      html += `<section class="card"><h3>${data.name}</h3>`;
+      for (const s of data.sets) {
+        html += `
+          <div class="detail-set-row" data-set-id="${s.id}">
+            <span class="set-num">Set ${s.setIndex + 1}</span>
+            <input type="number" class="edit-weight" value="${s.weight}" step="0.5" inputmode="decimal" aria-label="Charge">
+            <span class="small muted">kg ×</span>
+            <input type="number" class="edit-reps" value="${s.reps}" inputmode="numeric" aria-label="Reps">
+            <span class="small muted">reps</span>
+            <button class="btn btn-tiny edit-set-save" title="Sauvegarder">💾</button>
+            <button class="btn btn-tiny btn-ghost edit-set-delete" title="Supprimer">✕</button>
+          </div>
+        `;
+      }
+      html += '</section>';
+    }
+
+    html += `
+      <div style="margin-top:12px;">
+        <label class="small muted">Note</label>
+        <textarea id="edit-workout-note" rows="2" class="edit-note-field">${workout.note || ''}</textarea>
+        <button class="btn btn-ghost btn-block" id="save-workout-note" style="margin-top:8px;">Sauvegarder la note</button>
+      </div>
+    `;
+
+    root.innerHTML = html;
+    modal.classList.add('open');
+
+    // Sauvegarder la note du workout
+    document.getElementById('save-workout-note').addEventListener('click', async () => {
+      workout.note = document.getElementById('edit-workout-note').value;
+      await DB.put('workouts', workout);
+      flash(document.getElementById('save-workout-note'), 'Sauvé !');
+    });
+
+    // Modifier un set
+    root.querySelectorAll('.edit-set-save').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest('.detail-set-row');
+        const setId = parseInt(row.dataset.setId);
+        const set = await DB.get('sets', setId);
+        if (!set) return;
+        set.weight = parseFloat(row.querySelector('.edit-weight').value) || 0;
+        set.reps = parseInt(row.querySelector('.edit-reps').value) || 0;
+        await DB.put('sets', set);
+        // Recalcule le volume du workout
+        await recalcWorkoutVolume(workoutId);
+        flash(btn, '✓');
+      });
+    });
+
+    // Supprimer un set
+    root.querySelectorAll('.edit-set-delete').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Supprimer ce set ?')) return;
+        const row = btn.closest('.detail-set-row');
+        const setId = parseInt(row.dataset.setId);
+        await DB.del('sets', setId);
+        await recalcWorkoutVolume(workoutId);
+        row.remove();
+      });
+    });
+  }
+
+  async function recalcWorkoutVolume(workoutId) {
+    const workout = await DB.get('workouts', workoutId);
+    if (!workout) return;
+    const sets = await DB.getByIndex('sets', 'workoutId', workoutId);
+    workout.totalSets = sets.length;
+    workout.totalVolume = sets.reduce((a, s) => a + (s.weight * s.reps), 0);
+    await DB.put('workouts', workout);
+  }
+
+  function flash(el, text) {
+    const orig = el.textContent;
+    el.textContent = text || '✓';
+    el.classList.add('flash-success');
+    setTimeout(() => {
+      el.textContent = orig;
+      el.classList.remove('flash-success');
+    }, 800);
   }
 
   // ---- Stats ----
@@ -229,7 +379,7 @@ const App = (() => {
       <h1 class="screen-title">Stats</h1>
       <section class="card">
         <h3>1RM estimé — exos clés</h3>
-        <canvas id="chart-1rm" height="200" aria-label="Évolution 1RM estimé"></canvas>
+        <canvas id="chart-1rm" height="200"></canvas>
       </section>
       <section class="card">
         <h3>Volume hebdo par muscle (sets effectifs)</h3>
@@ -328,10 +478,8 @@ const App = (() => {
   }
 
   async function renderChartSleep() {
-    // On dérive le sommeil depuis les mensurations (champ sleep optionnel)
     const items = await DB.getAll('measurements');
     if (!items.length) { noDataMessage('chart-sleep'); return; }
-    // Bucket par semaine
     const byWeek = {};
     for (const m of items) {
       if (m.sleep == null || m.sleep === '') continue;
@@ -386,7 +534,7 @@ const App = (() => {
       plugins: { legend: { position: 'bottom', labels: { color: getCSSVar('--text') } } },
       scales: {
         x: {
-          type: xType === 'time' ? 'category' : 'category',
+          type: 'category',
           stacked: !!stacked,
           ticks: { color: getCSSVar('--text-muted'), maxRotation: 0 },
           grid: { color: getCSSVar('--border') },
@@ -428,7 +576,7 @@ const App = (() => {
         </form>
       </section>
       <section class="card">
-        <h3>Comparaison début ↔ maintenant</h3>
+        <h3>Comparaison début → maintenant</h3>
         <div id="measure-delta"></div>
       </section>
       <section class="card">
@@ -483,11 +631,11 @@ const App = (() => {
     if (!items.length) { root.innerHTML = '<p class="muted small">Aucune saisie.</p>'; return; }
     root.innerHTML = `<ul class="history-list">${items.map(m => `
       <li>
-        <strong>${m.date.slice(0,10)}</strong> · 
+        <strong>${m.date.slice(0,10)}</strong> ·
         ${m.weight ? m.weight + ' kg · ' : ''}
         ${m.armR ? 'bras ' + m.armR + ' · ' : ''}
         ${m.waist ? 'taille ' + m.waist + ' · ' : ''}
-        ${m.sleep ? '💤 ' + m.sleep + 'h' : ''}
+        ${m.sleep ? 'sommeil ' + m.sleep + 'h' : ''}
         <button class="btn btn-tiny" data-del="${m.id}">✕</button>
       </li>`).join('')}</ul>`;
     root.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
@@ -505,9 +653,6 @@ const App = (() => {
     const units = await DB.getSetting('units', 'metric');
     const sound = await DB.getSetting('soundEnabled', true);
     const vibration = await DB.getSetting('vibrationEnabled', true);
-    const startDate = await DB.getSetting('startDate');
-    const week = Program.getCurrentWeek(startDate);
-    const phase = Program.getCurrentPhase(startDate);
 
     root.innerHTML = `<h1 class="screen-title">Réglages</h1>
       <section class="card">
@@ -528,22 +673,16 @@ const App = (() => {
           <input type="checkbox" id="set-vib" ${vibration ? 'checked' : ''}></label>
       </section>
       <section class="card">
-        <h3>Programme</h3>
-        <p class="muted small">Semaine ${week} / 12 — ${phase.name}</p>
-        <button class="btn btn-ghost btn-block" id="force-deload">Marquer cette semaine comme deload</button>
-        <button class="btn btn-ghost btn-block" id="reset-start">Reset date de démarrage à aujourd'hui</button>
-      </section>
-      <section class="card">
         <h3>Données</h3>
-        <button class="btn btn-ghost btn-block" id="export">📤 Exporter (JSON)</button>
+        <button class="btn btn-ghost btn-block" id="export">Exporter (JSON)</button>
         <label class="btn btn-ghost btn-block">
-          📥 Importer (JSON)
+          Importer (JSON)
           <input id="import" type="file" accept="application/json" hidden>
         </label>
-        <button class="btn btn-danger btn-block" id="reset">🗑️ Reset complet</button>
+        <button class="btn btn-danger btn-block" id="reset">Reset complet</button>
       </section>
       <section class="card center">
-        <p class="muted small">Tracker Hypertrophie/Force · 100% offline · IndexedDB</p>
+        <p class="muted small">Tracker Muscu · 100% offline · IndexedDB</p>
       </section>
     `;
 
@@ -563,26 +702,10 @@ const App = (() => {
     document.getElementById('set-vib').addEventListener('change', async e => {
       await DB.setSetting('vibrationEnabled', e.target.checked);
     });
-    document.getElementById('force-deload').addEventListener('click', async () => {
-      // Reset startDate pour positionner semaine courante = 5 (deload)
-      const wk = Program.getCurrentWeek(startDate);
-      const shift = (5 - wk) * 7 * 24 * 60 * 60 * 1000;
-      await DB.setSetting('startDate', startDate + shift);
-      alert('Semaine courante désormais marquée comme deload.');
-      refreshAll();
-      renderSettings();
-    });
-    document.getElementById('reset-start').addEventListener('click', async () => {
-      if (confirm('Recommencer le programme depuis aujourd\'hui ?')) {
-        await DB.setSetting('startDate', Date.now());
-        refreshAll();
-        renderSettings();
-      }
-    });
     document.getElementById('export').addEventListener('click', exportData);
     document.getElementById('import').addEventListener('change', importData);
     document.getElementById('reset').addEventListener('click', async () => {
-      if (confirm('⚠️ Effacer TOUTES les données (séances, mensurations, paramètres) ? Action irréversible.')) {
+      if (confirm('Effacer TOUTES les données ? Action irréversible.')) {
         await DB.resetAll();
         location.reload();
       }
@@ -625,7 +748,6 @@ const App = (() => {
 
   function requestNotificationPermission() {
     if ('Notification' in window && Notification.permission === 'default') {
-      // Demande au premier geste utilisateur, pas au boot
       const handler = () => {
         try { Notification.requestPermission(); } catch (e) {}
         document.removeEventListener('click', handler);
@@ -634,10 +756,9 @@ const App = (() => {
     }
   }
 
-  return { init, refreshAll, switchTab };
+  return { init, switchTab, renderSessions };
 })();
 
 window.App = App;
 
-// Init au chargement
 document.addEventListener('DOMContentLoaded', () => App.init());

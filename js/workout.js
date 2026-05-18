@@ -3,7 +3,7 @@
 // ============================================================================
 
 const Workout = (() => {
-  let current = null; // { workoutId, sessionId, exercises, startedAt, sets: [] }
+  let current = null;
   let timerInterval = null;
   let timerEndsAt = 0;
   let audioCtx = null;
@@ -12,13 +12,11 @@ const Workout = (() => {
   function startTimer(seconds) {
     cancelTimer();
     timerEndsAt = Date.now() + seconds * 1000;
-    const modal = document.getElementById('timer-modal');
-    modal.classList.add('open');
+    document.getElementById('timer-modal').classList.add('open');
     updateTimerDisplay();
     timerInterval = setInterval(() => {
-      const remaining = Math.max(0, Math.round((timerEndsAt - Date.now()) / 1000));
       updateTimerDisplay();
-      if (remaining <= 0) {
+      if (Math.max(0, Math.round((timerEndsAt - Date.now()) / 1000)) <= 0) {
         finishTimer();
       }
     }, 250);
@@ -38,23 +36,19 @@ const Workout = (() => {
 
   async function finishTimer() {
     cancelTimer();
-    // Son via Web Audio (pas de fichier externe nécessaire)
     const enabled = await DB.getSetting('soundEnabled', true);
     if (enabled) playBeep();
-    // Vibration (Android — iOS ignore silencieusement)
     if (navigator.vibrate) {
       try { navigator.vibrate([200, 100, 200, 100, 400]); } catch (e) {}
     }
-    // Animation feedback léger
-    flash(document.body);
+    flashBody();
   }
 
   function updateTimerDisplay() {
     const remaining = Math.max(0, Math.round((timerEndsAt - Date.now()) / 1000));
     const m = Math.floor(remaining / 60);
     const s = remaining % 60;
-    document.getElementById('timer-display').textContent =
-      `${m}:${String(s).padStart(2, '0')}`;
+    document.getElementById('timer-display').textContent = `${m}:${String(s).padStart(2, '0')}`;
   }
 
   function playBeep() {
@@ -79,57 +73,50 @@ const Workout = (() => {
     } catch (e) { console.warn('Audio non disponible', e); }
   }
 
-  function flash(el) {
-    el.classList.add('flash');
-    setTimeout(() => el.classList.remove('flash'), 400);
+  function flashBody() {
+    document.body.classList.add('flash');
+    setTimeout(() => document.body.classList.remove('flash'), 400);
   }
 
   // ---- Démarrage / fin de séance ----
   async function startSession(sessionId) {
-    const session = Program.SESSIONS[sessionId];
+    const allSessions = await Program.getAllSessions();
+    const session = allSessions[sessionId];
     if (!session) return;
-    const phase = Program.getCurrentPhase(await DB.getSetting('startDate'));
-    // Applique surcharges éventuelles
+
     const overrides = await DB.getAll('program_overrides');
     const ovMap = Object.fromEntries(overrides.map(o => [o.exerciseId, o]));
+
     const exercises = session.exercises.map(ex => {
       const ov = ovMap[ex.id] || {};
-      const setsCount = phase.deload ? Math.max(2, Math.floor(ex.sets * 0.6)) : ex.sets;
       return {
         ...ex,
-        rir: ov.rir ?? ex.rir,
         rest: ov.rest ?? ex.rest,
         name: ov.name ?? ex.name,
-        sets: setsCount,
       };
     });
+
     current = {
       workoutId: null,
       sessionId,
       sessionName: session.name,
-      phase: phase.name,
-      week: Program.getCurrentWeek(await DB.getSetting('startDate')),
-      isDeload: phase.deload,
-      intensityMultiplier: phase.intensityMultiplier,
       exercises,
       startedAt: new Date().toISOString(),
       completedSets: [],
     };
-    // Crée le workout en base immédiatement (sauvegarde auto)
+
     current.workoutId = await DB.add('workouts', {
       sessionId,
       sessionName: session.name,
       date: current.startedAt,
-      phase: current.phase,
-      week: current.week,
-      isDeload: current.isDeload,
       finished: false,
     });
+
     renderWorkout();
     openModal('workout-modal');
   }
 
-  async function logSet(exerciseId, setIndex, weight, reps, rir) {
+  async function logSet(exerciseId, setIndex, weight, reps) {
     const ex = current.exercises.find(e => e.id === exerciseId);
     const record = {
       workoutId: current.workoutId,
@@ -138,16 +125,15 @@ const Workout = (() => {
       setIndex,
       weight: parseFloat(weight) || 0,
       reps: parseInt(reps, 10) || 0,
-      rir: parseInt(rir, 10) || 0,
       date: new Date().toISOString(),
     };
     const id = await DB.add('sets', record);
     record.id = id;
     current.completedSets.push(record);
-    // Met à jour l'historique du dernier passage (pour suggestion suivante)
+
+    // Met à jour l'historique du dernier passage
     const previous = await DB.get('exercise_history', exerciseId);
     if (!previous || setIndex === 0) {
-      // Si premier set, on initialise la session courante
       await DB.put('exercise_history', {
         exerciseId,
         lastDate: record.date,
@@ -156,7 +142,6 @@ const Workout = (() => {
     } else {
       previous.lastDate = record.date;
       previous.lastSets = previous.lastSets || [];
-      // Si même session, ajoute le set ; sinon écrase
       if (previous.lastSets[0] && previous.lastSets[0].workoutId === current.workoutId) {
         previous.lastSets.push(record);
       } else {
@@ -164,16 +149,15 @@ const Workout = (() => {
       }
       await DB.put('exercise_history', previous);
     }
-    // Déclenche le timer
+
     startTimer(ex.rest);
   }
 
-  async function finishSession(sensation, note) {
+  async function finishSession(note) {
     if (!current) return;
     const workout = await DB.get('workouts', current.workoutId);
     workout.finished = true;
     workout.finishedAt = new Date().toISOString();
-    workout.sensation = sensation;
     workout.note = note;
     workout.totalSets = current.completedSets.length;
     workout.totalVolume = current.completedSets.reduce(
@@ -182,13 +166,10 @@ const Workout = (() => {
     await DB.put('workouts', workout);
     closeModal('workout-modal');
     current = null;
-    if (window.App && App.refreshAll) App.refreshAll();
   }
 
   async function abortSession() {
     if (current && current.workoutId) {
-      // Conserve la séance (autosave) mais marque non finie
-      // Optionnel : supprimer si aucun set
       if (current.completedSets.length === 0) {
         await DB.del('workouts', current.workoutId);
       }
@@ -201,20 +182,14 @@ const Workout = (() => {
   async function renderWorkout() {
     const root = document.getElementById('workout-content');
     root.innerHTML = '';
+
     const header = document.createElement('div');
     header.className = 'workout-header';
-    const deloadBadge = current.isDeload
-      ? `<span class="badge badge-warning">⚠️ Semaine deload — charges 60%</span>` : '';
-    header.innerHTML = `
-      <h2>${current.sessionName}</h2>
-      <p class="muted">Semaine ${current.week} — ${current.phase}</p>
-      ${deloadBadge}
-    `;
+    header.innerHTML = `<h2>${current.sessionName}</h2>`;
     root.appendChild(header);
 
     for (let i = 0; i < current.exercises.length; i++) {
-      const ex = current.exercises[i];
-      const card = await renderExerciseCard(ex, i);
+      const card = await renderExerciseCard(current.exercises[i], i);
       root.appendChild(card);
     }
 
@@ -228,9 +203,7 @@ const Workout = (() => {
   async function renderExerciseCard(ex, index) {
     const card = document.createElement('section');
     card.className = 'exercise-card';
-    card.dataset.exerciseId = ex.id;
 
-    // Dernier passage
     const lastSession = await DB.get('exercise_history', ex.id);
     const lastSetsHtml = (lastSession && lastSession.lastSets &&
                          lastSession.lastSets[0] &&
@@ -238,13 +211,13 @@ const Workout = (() => {
       ? renderLastSetsLine(lastSession.lastSets)
       : '<p class="muted small">Premier passage sur cet exercice.</p>';
 
-    const suggestion = await computeSuggestion(ex, lastSession);
+    const suggestion = computeSuggestion(ex, lastSession);
     const repsTarget = ex.isTime
       ? `${ex.repsMin}-${ex.repsMax} s`
       : `${ex.repsMin}-${ex.repsMax} reps`;
     const perSideLabel = ex.perSide ? ' / côté' : '';
     const ezBadge = ex.ezBarOnly
-      ? `<span class="badge badge-warning">⚠️ Utiliser barre EZ uniquement</span>` : '';
+      ? `<span class="badge badge-warning">EZ uniquement</span>` : '';
 
     card.innerHTML = `
       <header class="exercise-head">
@@ -252,27 +225,28 @@ const Workout = (() => {
         ${ezBadge}
         <div class="exercise-meta">
           <span>${ex.sets} × ${repsTarget}</span>
-          <span>RIR ${ex.rir}</span>
           <span>Repos ${formatRest(ex.rest)}</span>
-          ${ex.tempo ? `<span>Tempo ${ex.tempo}</span>` : ''}
         </div>
-        <p class="exercise-note">${ex.note}</p>
+        ${ex.note ? `<p class="exercise-note">${ex.note}</p>` : ''}
         <div class="exercise-actions">
-          <a class="btn btn-ghost" href="${Exercises.buildYouTubeUrl(ex.name)}"
-             target="_blank" rel="noopener">▶ Voir technique</a>
+          <a class="btn btn-ghost btn-small" href="${Exercises.buildYouTubeUrl(ex.name)}"
+             target="_blank" rel="noopener">Voir technique</a>
         </div>
       </header>
       <div class="exercise-body">
-        <div class="anatomy-wrap"></div>
+        ${ex.muscles && ex.muscles.length ? '<div class="anatomy-wrap"></div>' : ''}
         <div class="exercise-right">
           <div class="last-session">${lastSetsHtml}</div>
-          ${suggestion ? `<div class="suggestion">💡 ${suggestion}</div>` : ''}
+          ${suggestion ? `<div class="suggestion">${suggestion}</div>` : ''}
           <div class="sets-list"></div>
         </div>
       </div>
     `;
 
-    card.querySelector('.anatomy-wrap').appendChild(Exercises.buildAnatomySvg(ex.muscles));
+    const anatomyWrap = card.querySelector('.anatomy-wrap');
+    if (anatomyWrap && ex.muscles && ex.muscles.length) {
+      anatomyWrap.appendChild(Exercises.buildAnatomySvg(ex.muscles));
+    }
 
     const setsList = card.querySelector('.sets-list');
     for (let s = 0; s < ex.sets; s++) {
@@ -283,52 +257,42 @@ const Workout = (() => {
   }
 
   function renderLastSetsLine(sets) {
-    const txt = sets.map(s => `${s.weight}kg × ${s.reps} (RIR ${s.rir})`).join(' · ');
+    const txt = sets.map(s => `${s.weight}kg × ${s.reps}`).join(' · ');
     return `<p class="small"><strong>Dernier passage :</strong> ${txt}</p>`;
   }
 
-  // Formule Epley pour suggestion : si dernier set en haut de fourchette avec RIR ≥ cible → +charge
-  async function computeSuggestion(ex, lastSession) {
+  function computeSuggestion(ex, lastSession) {
     if (!lastSession || !lastSession.lastSets || !lastSession.lastSets.length) return null;
-    const last = lastSession.lastSets;
-    // On regarde le top set (dernier set)
-    const top = last[last.length - 1];
-    if (top.reps >= ex.repsMax && top.rir >= ex.rir) {
+    const top = lastSession.lastSets[lastSession.lastSets.length - 1];
+    if (top.reps >= ex.repsMax) {
       const increment = ex.isCompound ? 2.5 : 1.25;
       const newWeight = Math.round((top.weight + increment) * 2) / 2;
-      return `Tu as fait ${top.weight}kg × ${top.reps} (RIR ${top.rir}) → essaie <strong>${newWeight} kg</strong>.`;
+      return `Dernier : ${top.weight}kg × ${top.reps} → essaie <strong>${newWeight} kg</strong>`;
     }
     if (top.reps < ex.repsMin) {
       return `Reps en dessous de la cible — garde la charge et vise ${ex.repsMin}+ reps.`;
     }
-    return `Reste sur ${top.weight} kg, vise plus de reps cette fois.`;
+    return `Reste sur ${top.weight} kg, vise plus de reps.`;
   }
 
   function buildSetRow(ex, setIndex) {
     const row = document.createElement('div');
     row.className = 'set-row';
-    row.dataset.setIndex = setIndex;
-    const deloadHint = current.isDeload ? ' (deload : ~60% charge habituelle)' : '';
     row.innerHTML = `
       <span class="set-num">Set ${setIndex + 1}</span>
-      <label class="sr-only" for="w-${ex.id}-${setIndex}">Charge (kg)</label>
-      <input id="w-${ex.id}-${setIndex}" type="number" inputmode="decimal" step="0.5"
-             placeholder="kg${deloadHint}" aria-label="Charge ${setIndex + 1}">
-      <label class="sr-only" for="r-${ex.id}-${setIndex}">Reps</label>
-      <input id="r-${ex.id}-${setIndex}" type="number" inputmode="numeric"
-             placeholder="${ex.isTime ? 'sec' : 'reps'}" aria-label="Reps ${setIndex + 1}">
-      <label class="sr-only" for="ri-${ex.id}-${setIndex}">RIR</label>
-      <input id="ri-${ex.id}-${setIndex}" type="number" inputmode="numeric"
-             placeholder="RIR" min="0" max="10" aria-label="RIR ${setIndex + 1}">
+      <input type="number" inputmode="decimal" step="0.5"
+             placeholder="kg" aria-label="Charge set ${setIndex + 1}">
+      <input type="number" inputmode="numeric"
+             placeholder="${ex.isTime ? 'sec' : 'reps'}" aria-label="Reps set ${setIndex + 1}">
       <button class="btn btn-small validate-set" aria-label="Valider set">✓</button>
     `;
     const btn = row.querySelector('.validate-set');
+    const inputs = row.querySelectorAll('input');
     btn.addEventListener('click', async () => {
-      const w = row.querySelector(`#w-${ex.id}-${setIndex}`).value;
-      const r = row.querySelector(`#r-${ex.id}-${setIndex}`).value;
-      const ri = row.querySelector(`#ri-${ex.id}-${setIndex}`).value || ex.rir;
+      const w = inputs[0].value;
+      const r = inputs[1].value;
       if (!r) { alert('Indique au moins les reps.'); return; }
-      await logSet(ex.id, setIndex, w, r, ri);
+      await logSet(ex.id, setIndex, w, r);
       row.classList.add('done');
       btn.disabled = true;
       btn.textContent = '✓ ok';
@@ -344,8 +308,7 @@ const Workout = (() => {
   }
 
   function promptFinish() {
-    const overlay = document.getElementById('finish-modal');
-    overlay.classList.add('open');
+    document.getElementById('finish-modal').classList.add('open');
   }
 
   function openModal(id) { document.getElementById(id).classList.add('open'); }

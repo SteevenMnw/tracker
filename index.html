@@ -27,13 +27,12 @@
 
   <main id="app">
 
-    <!-- Aujourd'hui -->
-    <section id="screen-today" class="screen active" aria-label="Aujourd'hui">
-      <!-- Rempli par app.js -->
+    <!-- Séances (choix + création) -->
+    <section id="screen-sessions" class="screen active" aria-label="Séances">
     </section>
 
-    <!-- Programme -->
-    <section id="screen-program" class="screen" aria-label="Programme">
+    <!-- Historique -->
+    <section id="screen-history" class="screen" aria-label="Historique">
     </section>
 
     <!-- Stats -->
@@ -81,8 +80,6 @@
   <div id="finish-modal" class="modal-overlay" role="dialog" aria-modal="true">
     <div class="dialog">
       <h3>Terminer la séance</h3>
-      <label for="finish-sensation">Sensation générale (1–10)</label>
-      <input id="finish-sensation" type="number" min="1" max="10" step="1" value="7" inputmode="numeric">
       <label for="finish-note">Note libre (optionnel)</label>
       <textarea id="finish-note" rows="3" placeholder="Énergie, douleurs, observations..."></textarea>
       <div class="dialog-actions">
@@ -94,11 +91,11 @@
 
   <!-- Navigation onglets -->
   <nav class="tab-bar" role="navigation" aria-label="Navigation principale">
-    <button class="tab-btn active" data-screen="today" aria-label="Aujourd'hui">
-      <span class="icon">🏠</span><span>Aujourd'hui</span>
+    <button class="tab-btn active" data-screen="sessions" aria-label="Séances">
+      <span class="icon">💪</span><span>Séances</span>
     </button>
-    <button class="tab-btn" data-screen="program" aria-label="Programme">
-      <span class="icon">📋</span><span>Programme</span>
+    <button class="tab-btn" data-screen="history" aria-label="Historique">
+      <span class="icon">📋</span><span>Historique</span>
     </button>
     <button class="tab-btn" data-screen="stats" aria-label="Statistiques">
       <span class="icon">📈</span><span>Stats</span>
@@ -111,10 +108,10 @@
     </button>
   </nav>
 
-  <!-- Chart.js (mis en cache par le SW au 1er chargement) -->
+  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
 
-  <!-- Scripts app (ordre des dépendances) -->
+  <!-- Scripts app -->
   <script src="js/db.js" defer></script>
   <script src="js/program.js" defer></script>
   <script src="js/exercises.js" defer></script>

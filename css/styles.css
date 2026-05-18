@@ -213,10 +213,10 @@ body {
   margin-bottom: 10px;
 }
 
-/* Set rows */
+/* Set rows (3 cols: set label, kg, reps, validate) */
 .set-row {
   display: grid;
-  grid-template-columns: 50px 1fr 1fr 1fr 44px;
+  grid-template-columns: 50px 1fr 1fr 44px;
   gap: 6px;
   align-items: center;
   padding: 6px 0;
@@ -479,6 +479,111 @@ body.flash::after {
 @keyframes flashAnim {
   from { opacity: 0.25; }
   to { opacity: 0; }
+}
+
+/* Session cards */
+.session-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.session-card-head h2 { margin: 0 0 2px; font-size: 18px; }
+
+/* History cards */
+.history-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.history-card-head h3 { margin: 0 0 2px; }
+.history-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+/* Workout detail edit rows */
+.detail-set-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.detail-set-row:last-child { border-bottom: none; }
+.detail-set-row input[type="number"] {
+  width: 70px;
+  padding: 8px 6px;
+  font-size: 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  text-align: center;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.detail-set-row input:focus { outline: none; border-color: var(--primary); }
+
+/* Edit note field in workout detail */
+.edit-note-field {
+  width: 100%;
+  padding: 10px;
+  font-size: 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  resize: vertical;
+  min-height: 60px;
+  font-family: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.edit-note-field:focus { outline: none; border-color: var(--primary); }
+
+/* Flash success on buttons */
+.flash-success { color: var(--success) !important; }
+
+/* Create session form */
+.create-form label {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  gap: 4px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.create-form input[type="text"],
+.create-form input[type="number"] {
+  font-size: 16px;
+  padding: 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  -webkit-appearance: none;
+  appearance: none;
+}
+.create-form input:focus { outline: none; border-color: var(--primary); }
+.create-form h3 { margin: 16px 0 8px; }
+
+.cs-exercise-row {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.cs-exercise-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.cs-row-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 8px;
 }
 
 /* Tablette */
