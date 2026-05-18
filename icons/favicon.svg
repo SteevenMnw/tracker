@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><metadata><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/"><rdf:Description><dc:creator>RealFaviconGenerator</dc:creator><dc:source>https://realfavicongenerator.net</dc:source></rdf:Description></rdf:RDF></metadata><rect width="512" height="512" rx="112" fill="#0a0a0b"></rect><rect x="4" y="4" width="504" height="504" rx="108" fill="none" stroke="#2a2a30" stroke-width="2"></rect><g transform="translate(256 256)">
+    <!-- Barre centrale -->
+    <rect x="-130" y="-14" width="260" height="28" rx="6" fill="#f5f5f7"></rect>
+
+    <!-- Poids gauche -->
+    <rect x="-180" y="-60" width="34" height="120" rx="6" fill="#ff3b30"></rect>
+    <rect x="-216" y="-80" width="34" height="160" rx="6" fill="#ff3b30"></rect>
+
+    <!-- Poids droite -->
+    <rect x="146" y="-60" width="34" height="120" rx="6" fill="#ff3b30"></rect>
+    <rect x="182" y="-80" width="34" height="160" rx="6" fill="#ff3b30"></rect>
+  </g><text x="256" y="446" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="42" font-weight="700" fill="#f5f5f7" letter-spacing="2">
+    TRACKER
+  </text></svg>

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <title>Tracker Muscu</title>
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0a0a0b">
+
+  <!-- iOS PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Tracker">
+  <link rel="apple-touch-icon" sizes="120x120" href="icons/icon-120.png">
+  <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
+  <link rel="apple-touch-icon" sizes="167x167" href="icons/icon-167.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <main id="app">
+
+    <!-- Aujourd'hui -->
+    <section id="screen-today" class="screen active" aria-label="Aujourd'hui">
+      <!-- Rempli par app.js -->
+    </section>
+
+    <!-- Programme -->
+    <section id="screen-program" class="screen" aria-label="Programme">
+    </section>
+
+    <!-- Stats -->
+    <section id="screen-stats" class="screen" aria-label="Statistiques">
+    </section>
+
+    <!-- Mensurations -->
+    <section id="screen-measurements" class="screen" aria-label="Mensurations">
+    </section>
+
+    <!-- Réglages -->
+    <section id="screen-settings" class="screen" aria-label="Réglages">
+    </section>
+
+  </main>
+
+  <!-- Modal séance en cours -->
+  <div id="workout-modal" class="modal" role="dialog" aria-modal="true" aria-label="Séance en cours">
+    <div class="modal-bar">
+      <h2>Séance en cours</h2>
+      <button class="btn btn-small btn-ghost" id="workout-abort" aria-label="Fermer">✕</button>
+    </div>
+    <div id="workout-content" class="modal-content"></div>
+  </div>
+
+  <!-- Modal timer plein écran -->
+  <div id="timer-modal" class="modal" role="dialog" aria-modal="true" aria-label="Timer de repos">
+    <div class="modal-bar">
+      <h2>Repos</h2>
+      <button class="btn btn-small btn-ghost" id="timer-skip" aria-label="Passer">Passer</button>
+    </div>
+    <div class="modal-content">
+      <div id="timer-display" aria-live="polite">0:00</div>
+      <div class="timer-controls">
+        <button class="btn btn-ghost" id="timer-minus" aria-label="-15s">−15s</button>
+        <button class="btn btn-ghost" id="timer-plus" aria-label="+15s">+15s</button>
+      </div>
+      <p class="muted small center" style="text-align:center; margin-top:30px;">
+        Une notification sonore se déclenchera à la fin du repos.
+      </p>
+    </div>
+  </div>
+
+  <!-- Overlay terminer séance -->
+  <div id="finish-modal" class="modal-overlay" role="dialog" aria-modal="true">
+    <div class="dialog">
+      <h3>Terminer la séance</h3>
+      <label for="finish-sensation">Sensation générale (1–10)</label>
+      <input id="finish-sensation" type="number" min="1" max="10" step="1" value="7" inputmode="numeric">
+      <label for="finish-note">Note libre (optionnel)</label>
+      <textarea id="finish-note" rows="3" placeholder="Énergie, douleurs, observations..."></textarea>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" id="finish-cancel">Annuler</button>
+        <button class="btn btn-primary" id="finish-confirm">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Navigation onglets -->
+  <nav class="tab-bar" role="navigation" aria-label="Navigation principale">
+    <button class="tab-btn active" data-screen="today" aria-label="Aujourd'hui">
+      <span class="icon">🏠</span><span>Aujourd'hui</span>
+    </button>
+    <button class="tab-btn" data-screen="program" aria-label="Programme">
+      <span class="icon">📋</span><span>Programme</span>
+    </button>
+    <button class="tab-btn" data-screen="stats" aria-label="Statistiques">
+      <span class="icon">📈</span><span>Stats</span>
+    </button>
+    <button class="tab-btn" data-screen="measurements" aria-label="Mensurations">
+      <span class="icon">📏</span><span>Mesures</span>
+    </button>
+    <button class="tab-btn" data-screen="settings" aria-label="Réglages">
+      <span class="icon">⚙️</span><span>Réglages</span>
+    </button>
+  </nav>
+
+  <!-- Chart.js (mis en cache par le SW au 1er chargement) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
+
+  <!-- Scripts app (ordre des dépendances) -->
+  <script src="js/db.js" defer></script>
+  <script src="js/program.js" defer></script>
+  <script src="js/exercises.js" defer></script>
+  <script src="js/stats.js" defer></script>
+  <script src="js/workout.js" defer></script>
+  <script src="js/app.js" defer></script>
+
+</body>
+</html>
