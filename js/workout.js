@@ -219,6 +219,11 @@ const Workout = (() => {
     const ezBadge = ex.ezBarOnly
       ? `<span class="badge badge-warning">EZ uniquement</span>` : '';
 
+    // Résout les muscles depuis le catalogue si pas dans l'objet exercice
+    const cat = Exercises.getCatalogExercise(ex.id);
+    const muscles = (ex.muscles && ex.muscles.length) ? ex.muscles : (cat ? cat.muscles : []);
+    const hasMuscles = muscles && muscles.length > 0;
+
     card.innerHTML = `
       <header class="exercise-head">
         <h3>${index + 1}. ${ex.name}${perSideLabel}</h3>
@@ -233,8 +238,8 @@ const Workout = (() => {
              target="_blank" rel="noopener">Voir technique</a>
         </div>
       </header>
-      <div class="exercise-body">
-        ${ex.muscles && ex.muscles.length ? '<div class="anatomy-wrap"></div>' : ''}
+      <div class="exercise-body${hasMuscles ? '' : ' no-anatomy'}">
+        ${hasMuscles ? '<div class="anatomy-wrap"></div>' : ''}
         <div class="exercise-right">
           <div class="last-session">${lastSetsHtml}</div>
           ${suggestion ? `<div class="suggestion">${suggestion}</div>` : ''}
@@ -243,9 +248,8 @@ const Workout = (() => {
       </div>
     `;
 
-    const anatomyWrap = card.querySelector('.anatomy-wrap');
-    if (anatomyWrap && ex.muscles && ex.muscles.length) {
-      anatomyWrap.appendChild(Exercises.buildAnatomySvg(ex.muscles));
+    if (hasMuscles) {
+      card.querySelector('.anatomy-wrap').appendChild(Exercises.buildAnatomySvg(muscles));
     }
 
     const setsList = card.querySelector('.sets-list');

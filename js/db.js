@@ -5,7 +5,7 @@
 // ============================================================================
 
 const DB_NAME = 'TrackerDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let _dbPromise = null;
 
 function openDb() {
@@ -40,6 +40,9 @@ function openDb() {
       }
       if (!db.objectStoreNames.contains('custom_sessions')) {
         db.createObjectStore('custom_sessions', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('custom_exercises')) {
+        db.createObjectStore('custom_exercises', { keyPath: 'id' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -82,7 +85,7 @@ async function setSetting(key, value) {
 
 async function exportAll() {
   const stores = ['workouts', 'sets', 'measurements', 'settings',
-                  'exercise_history', 'program_overrides', 'custom_sessions'];
+                  'exercise_history', 'program_overrides', 'custom_sessions', 'custom_exercises'];
   const data = { version: DB_VERSION, exportedAt: new Date().toISOString() };
   for (const s of stores) data[s] = await getAll(s);
   return data;
@@ -90,7 +93,7 @@ async function exportAll() {
 
 async function importAll(data) {
   const stores = ['workouts', 'sets', 'measurements', 'settings',
-                  'exercise_history', 'program_overrides', 'custom_sessions'];
+                  'exercise_history', 'program_overrides', 'custom_sessions', 'custom_exercises'];
   for (const s of stores) {
     if (!Array.isArray(data[s])) continue;
     await clear(s);
@@ -102,7 +105,7 @@ async function importAll(data) {
 
 async function resetAll() {
   const stores = ['workouts', 'sets', 'measurements', 'settings',
-                  'exercise_history', 'program_overrides', 'custom_sessions'];
+                  'exercise_history', 'program_overrides', 'custom_sessions', 'custom_exercises'];
   for (const s of stores) await clear(s);
 }
 
