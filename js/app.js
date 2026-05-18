@@ -403,19 +403,32 @@ const App = (() => {
     if (!workout) return;
     const sets = await DB.getByIndex('sets', 'workoutId', workoutId);
 
-    // Regroupe par exercice en gardant l'ordre d'apparition (premier set de chaque exo)
-    const exerciseOrder = [];
+    // Regroupe par exercice
     const byExercise = {};
-    for (const s of sets.sort((a, b) => a.date.localeCompare(b.date))) {
+    for (const s of sets) {
       if (!byExercise[s.exerciseId]) {
         byExercise[s.exerciseId] = { name: s.exerciseName, sets: [] };
-        exerciseOrder.push(s.exerciseId);
       }
       byExercise[s.exerciseId].sets.push(s);
     }
-    // Trie les sets de chaque exercice par setIndex
-    for (const exId of exerciseOrder) {
+    for (const exId of Object.keys(byExercise)) {
       byExercise[exId].sets.sort((a, b) => a.setIndex - b.setIndex);
+    }
+
+    // Ordre des exercices : utilise l'ordre de la séance source si disponible
+    let exerciseOrder = Object.keys(byExercise);
+    const allSessions = await Program.getAllSessions();
+    const session = allSessions[workout.sessionId];
+    if (session && session.exercises) {
+      const sessionOrder = session.exercises.map(e => e.id);
+      exerciseOrder.sort((a, b) => {
+        const ia = sessionOrder.indexOf(a);
+        const ib = sessionOrder.indexOf(b);
+        if (ia === -1 && ib === -1) return 0;
+        if (ia === -1) return 1;
+        if (ib === -1) return -1;
+        return ia - ib;
+      });
     }
 
     const modal = document.getElementById('workout-modal');
@@ -531,19 +544,23 @@ const App = (() => {
   // ======== STATS ========
   async function renderStats() {
     const root = document.getElementById('screen-stats');
-    const muscleOptions = Object.entries(Stats.MUSCLE_LABELS)
-      .map(([k, v]) => `<button type="button" class="muscle-toggle" data-muscle="${k}">${v}</button>`)
-      .join('');
+    const recordedExercises = await Stats.getRecordedExercises();
+
+    const exerciseButtons = recordedExercises.length
+      ? recordedExercises.map(ex =>
+          `<button type="button" class="exercise-toggle" data-exid="${ex.id}">${ex.name}</button>`
+        ).join('')
+      : '';
 
     root.innerHTML = `
       <h1 class="screen-title">Stats</h1>
 
       <section class="card">
-        <h3>Progression par muscle</h3>
-        <p class="muted small">Sélectionne un ou plusieurs muscles pour voir l'évolution de la charge moyenne (kg) par semaine.</p>
-        <div class="muscle-selector">${muscleOptions}</div>
-        <div class="chart-wrap" style="height:220px"><canvas id="chart-muscle-prog"></canvas></div>
-        <p id="muscle-prog-empty" class="muted small hidden">Sélectionne au moins un muscle.</p>
+        <h3>Progression par exercice</h3>
+        <p class="muted small">Sélectionne un ou plusieurs exercices pour voir l'évolution de la charge moyenne (kg) par semaine.</p>
+        <div class="exercise-selector">${exerciseButtons}</div>
+        <div class="chart-wrap" style="height:220px"><canvas id="chart-ex-prog"></canvas></div>
+        <p id="ex-prog-empty" class="muted small">${recordedExercises.length ? 'Sélectionne au moins un exercice.' : 'Fais une séance pour voir tes stats.'}</p>
       </section>
 
       <section class="card">
@@ -570,18 +587,15 @@ const App = (() => {
 
     destroyCharts();
 
-    // Muscle selector interactivity
-    const selectedMuscles = new Set();
-    root.querySelectorAll('.muscle-toggle').forEach(btn => {
+    const selectedExercises = new Set();
+    root.querySelectorAll('.exercise-toggle').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const m = btn.dataset.muscle;
-        if (selectedMuscles.has(m)) { selectedMuscles.delete(m); btn.classList.remove('active'); }
-        else { selectedMuscles.add(m); btn.classList.add('active'); }
-        await renderMuscleProgression([...selectedMuscles]);
+        const id = btn.dataset.exid;
+        if (selectedExercises.has(id)) { selectedExercises.delete(id); btn.classList.remove('active'); }
+        else { selectedExercises.add(id); btn.classList.add('active'); }
+        await renderExerciseProgression([...selectedExercises], recordedExercises);
       });
     });
-
-    document.getElementById('muscle-prog-empty').classList.remove('hidden');
 
     await renderActivityChart();
     await renderChartBodyweight();
@@ -593,27 +607,31 @@ const App = (() => {
     }, 100);
   }
 
-  async function renderMuscleProgression(selectedMuscles) {
-    const emptyEl = document.getElementById('muscle-prog-empty');
-    if (!selectedMuscles.length) {
-      if (charts.muscleProg) { charts.muscleProg.destroy(); delete charts.muscleProg; }
-      emptyEl.classList.remove('hidden');
+  const EXERCISE_COLORS = ['#ff6384', '#36a2eb', '#ffcd56', '#4bc0c0', '#9966ff', '#ff9f40', '#c9cbcf', '#30d158', '#ff453a', '#bf5af2', '#64d2ff', '#ffd60a'];
+
+  async function renderExerciseProgression(selectedIds, recordedExercises) {
+    const emptyEl = document.getElementById('ex-prog-empty');
+    if (!selectedIds.length) {
+      if (charts.exProg) { charts.exProg.destroy(); delete charts.exProg; }
+      emptyEl.textContent = 'Sélectionne au moins un exercice.';
+      emptyEl.style.display = '';
       return;
     }
-    emptyEl.classList.add('hidden');
+    emptyEl.style.display = 'none';
 
-    const { weeks, datasets } = await Stats.getMuscleProgressionData(selectedMuscles);
+    const { weeks, datasets } = await Stats.getExerciseProgressionData(selectedIds);
     if (!weeks.length) {
-      emptyEl.textContent = 'Pas encore de données pour ces muscles.';
-      emptyEl.classList.remove('hidden');
+      emptyEl.textContent = 'Pas encore de données pour ces exercices.';
+      emptyEl.style.display = '';
       return;
     }
 
-    const chartDatasets = Object.entries(datasets).map(([m, vals]) => ({
-      label: Stats.MUSCLE_LABELS[m] || m,
+    const nameMap = Object.fromEntries(recordedExercises.map(e => [e.id, e.name]));
+    const chartDatasets = Object.entries(datasets).map(([exId, vals], i) => ({
+      label: nameMap[exId] || exId,
       data: vals,
-      borderColor: Stats.MUSCLE_COLORS[m] || '#0a84ff',
-      backgroundColor: (Stats.MUSCLE_COLORS[m] || '#0a84ff') + '33',
+      borderColor: EXERCISE_COLORS[i % EXERCISE_COLORS.length],
+      backgroundColor: EXERCISE_COLORS[i % EXERCISE_COLORS.length] + '33',
       borderWidth: 2.5,
       tension: 0.3,
       pointRadius: 4,
@@ -621,8 +639,8 @@ const App = (() => {
       spanGaps: true,
     }));
 
-    if (charts.muscleProg) charts.muscleProg.destroy();
-    charts.muscleProg = new Chart(document.getElementById('chart-muscle-prog'), {
+    if (charts.exProg) charts.exProg.destroy();
+    charts.exProg = new Chart(document.getElementById('chart-ex-prog'), {
       type: 'line',
       data: { labels: weeks, datasets: chartDatasets },
       options: chartOptions({}),

@@ -32,46 +32,45 @@ function resolveExerciseMuscles(exerciseId) {
   return [];
 }
 
-// Progression par muscle : charge moyenne (kg) par semaine pour les muscles sélectionnés
-async function getMuscleProgressionData(selectedMuscles) {
+// Progression par exercice : charge moyenne (kg) par semaine pour les exercices sélectionnés
+async function getExerciseProgressionData(selectedExerciseIds) {
   const sets = await DB.getAll('sets');
   if (!sets.length) return { weeks: [], datasets: {} };
-
-  // Charge aussi les exercices custom pour résoudre les muscles
-  const customExercises = await DB.getAll('custom_exercises');
-  const customMap = {};
-  customExercises.forEach(e => { customMap[e.id] = e; });
 
   const byWeek = {};
   for (const s of sets) {
     if (!s.weight || s.weight <= 0) continue;
+    if (!selectedExerciseIds.includes(s.exerciseId)) continue;
     const d = new Date(s.date);
-    const monday = getMonday(d).toISOString().slice(0, 10);
+    const monday = localDateStr(getMonday(d));
 
-    // Trouve les muscles de cet exercice
-    let muscles = resolveExerciseMuscles(s.exerciseId);
-    if (!muscles.length && customMap[s.exerciseId]) {
-      muscles = customMap[s.exerciseId].muscles || [];
-    }
-
-    for (const m of muscles) {
-      if (!selectedMuscles.includes(m)) continue;
-      if (!byWeek[monday]) byWeek[monday] = {};
-      if (!byWeek[monday][m]) byWeek[monday][m] = [];
-      byWeek[monday][m].push(s.weight);
-    }
+    if (!byWeek[monday]) byWeek[monday] = {};
+    if (!byWeek[monday][s.exerciseId]) byWeek[monday][s.exerciseId] = [];
+    byWeek[monday][s.exerciseId].push(s.weight);
   }
 
   const weeks = Object.keys(byWeek).sort();
   const datasets = {};
-  for (const m of selectedMuscles) {
-    datasets[m] = weeks.map(w => {
-      const vals = (byWeek[w] && byWeek[w][m]) || [];
+  for (const exId of selectedExerciseIds) {
+    datasets[exId] = weeks.map(w => {
+      const vals = (byWeek[w] && byWeek[w][exId]) || [];
       if (!vals.length) return null;
       return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
     });
   }
   return { weeks, datasets };
+}
+
+// Liste des exercices uniques présents dans l'historique des sets
+async function getRecordedExercises() {
+  const sets = await DB.getAll('sets');
+  const map = {};
+  for (const s of sets) {
+    if (!map[s.exerciseId]) {
+      map[s.exerciseId] = s.exerciseName || s.exerciseId;
+    }
+  }
+  return Object.entries(map).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Activité hebdo : quelles séances faites par semaine
@@ -82,7 +81,7 @@ async function getWeeklyActivityData() {
   const byWeek = {};
   for (const w of workouts) {
     const d = new Date(w.date);
-    const monday = getMonday(d).toISOString().slice(0, 10);
+    const monday = localDateStr(getMonday(d));
     if (!byWeek[monday]) byWeek[monday] = [];
     byWeek[monday].push({
       name: w.sessionName || w.sessionId,
@@ -123,7 +122,7 @@ async function getWeeklyVolumeByMuscle() {
   const byWeek = {};
   for (const s of sets) {
     const d = new Date(s.date);
-    const monday = getMonday(d).toISOString().slice(0, 10);
+    const monday = localDateStr(getMonday(d));
     let muscles = resolveExerciseMuscles(s.exerciseId);
     if (!muscles.length && customMap[s.exerciseId]) {
       muscles = customMap[s.exerciseId].muscles || [];
@@ -225,11 +224,19 @@ function getMonday(d) {
   return x;
 }
 
+function localDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 window.Stats = {
   estimate1RM,
   MUSCLE_LABELS,
   MUSCLE_COLORS,
-  getMuscleProgressionData,
+  getExerciseProgressionData,
+  getRecordedExercises,
   getWeeklyActivityData,
   getWeeklyVolumeByMuscle,
   getPRTable,
