@@ -150,7 +150,9 @@ const Workout = (() => {
       await DB.put('exercise_history', previous);
     }
 
+    updateProgressBar();
     startTimer(ex.rest);
+    return id;
   }
 
   async function finishSession(note) {
@@ -170,22 +172,43 @@ const Workout = (() => {
 
   async function abortSession() {
     if (current && current.workoutId) {
-      if (current.completedSets.length === 0) {
-        await DB.del('workouts', current.workoutId);
+      for (const s of current.completedSets) {
+        await DB.del('sets', s.id);
       }
+      await DB.del('workouts', current.workoutId);
     }
     current = null;
     closeModal('workout-modal');
   }
 
   // ---- Rendu DOM ----
+  function updateProgressBar() {
+    const bar = document.getElementById('workout-progress-fill');
+    if (!bar || !current) return;
+    const totalSets = current.exercises.reduce((a, e) => a + (e.sets || 0), 0);
+    const doneSets = current.completedSets.length;
+    const pct = totalSets > 0 ? Math.round((doneSets / totalSets) * 100) : 0;
+    bar.style.width = pct + '%';
+    const label = document.getElementById('workout-progress-label');
+    if (label) label.textContent = `${doneSets} / ${totalSets} sets`;
+  }
+
   async function renderWorkout() {
     const root = document.getElementById('workout-content');
     root.innerHTML = '';
 
+    const totalSets = current.exercises.reduce((a, e) => a + (e.sets || 0), 0);
+
     const header = document.createElement('div');
     header.className = 'workout-header';
-    header.innerHTML = `<h2>${current.sessionName}</h2>`;
+    header.innerHTML = `
+      <h2>${current.sessionName}</h2>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 4px;">
+        <span class="small muted" id="workout-progress-label">0 / ${totalSets} sets</span>
+        <span class="small muted">${current.exercises.length} exercices</span>
+      </div>
+      <div class="workout-progress"><div class="workout-progress-fill" id="workout-progress-fill" style="width:0%"></div></div>
+    `;
     root.appendChild(header);
 
     for (let i = 0; i < current.exercises.length; i++) {
@@ -292,13 +315,26 @@ const Workout = (() => {
     `;
     const btn = row.querySelector('.validate-set');
     const inputs = row.querySelectorAll('input');
+    let setRecordId = null;
     btn.addEventListener('click', async () => {
+      if (row.classList.contains('done')) {
+        if (setRecordId) {
+          await DB.del('sets', setRecordId);
+          current.completedSets = current.completedSets.filter(s => s.id !== setRecordId);
+          setRecordId = null;
+        }
+        row.classList.remove('done');
+        inputs.forEach(i => i.disabled = false);
+        btn.textContent = '✓';
+        updateProgressBar();
+        return;
+      }
       const w = inputs[0].value;
       const r = inputs[1].value;
       if (!r) { alert('Indique au moins les reps.'); return; }
-      await logSet(ex.id, setIndex, w, r);
+      setRecordId = await logSet(ex.id, setIndex, w, r);
       row.classList.add('done');
-      btn.disabled = true;
+      inputs.forEach(i => i.disabled = true);
       btn.textContent = '✓ ok';
     });
     return row;

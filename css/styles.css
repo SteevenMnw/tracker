@@ -1038,6 +1038,213 @@ body.flash::after {
 /* =========================================================================
    TABLET BREAKPOINT
    ========================================================================= */
+/* =========================================================================
+   KPI CARDS — summary metrics row
+   ========================================================================= */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.kpi-card {
+  background: var(--bg-card);
+  background-image: var(--gradient-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  box-shadow: var(--shadow-card);
+}
+.kpi-card-mini { padding: 10px 8px; border-radius: 14px; }
+.kpi-value {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.kpi-card-mini .kpi-value { font-size: 18px; }
+.kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: center;
+}
+
+/* =========================================================================
+   SESSION CARDS — enhanced layout
+   ========================================================================= */
+.session-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.session-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.session-type-force {
+  background: rgba(229, 53, 53, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(229, 53, 53, 0.2);
+}
+.session-type-volume {
+  background: rgba(74, 142, 255, 0.12);
+  color: var(--primary);
+  border: 1px solid rgba(74, 142, 255, 0.2);
+}
+.session-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0;
+}
+.session-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.session-meta-icon { font-size: 14px; flex-shrink: 0; }
+.session-meta-item strong { color: var(--text); font-weight: 700; }
+
+/* =========================================================================
+   HISTORY — enhanced cards
+   ========================================================================= */
+.history-date-header {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 18px 0 8px;
+}
+.history-date-header:first-of-type { padding-top: 4px; }
+
+.history-card-info { flex: 1; min-width: 0; }
+.history-card-info h3 { margin: 0 0 6px; font-size: 17px; }
+.history-card-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.history-stat {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.history-vol-bar {
+  height: 4px;
+  background: var(--bg-elev);
+  border-radius: 2px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+.history-vol-fill {
+  height: 100%;
+  background: var(--gradient-primary);
+  border-radius: 2px;
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* =========================================================================
+   DETAIL HEADER
+   ========================================================================= */
+.detail-header { margin-bottom: 20px; }
+.detail-header h2 { margin: 0 0 4px; font-size: 24px; font-weight: 800; }
+
+/* =========================================================================
+   EMPTY STATES
+   ========================================================================= */
+.empty-state {
+  text-align: center;
+  padding: 24px 16px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+.empty-state-icon {
+  font-size: 36px;
+  margin-bottom: 8px;
+  opacity: 0.6;
+}
+.empty-state-card {
+  background: var(--bg-card);
+  background-image: var(--gradient-card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 40px 24px;
+  text-align: center;
+  box-shadow: var(--shadow-card);
+}
+.empty-state-text {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 12px 0 6px;
+}
+.empty-state-sub {
+  font-size: 14px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* =========================================================================
+   WORKOUT PROGRESS BAR
+   ========================================================================= */
+.workout-progress {
+  height: 4px;
+  background: var(--bg-elev);
+  border-radius: 2px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.workout-progress-fill {
+  height: 100%;
+  background: var(--gradient-primary);
+  border-radius: 2px;
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* =========================================================================
+   STAGGER ANIMATION — cards entrance
+   ========================================================================= */
+[data-stagger] {
+  animation: staggerIn 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+.card:nth-child(2) { animation-delay: 0.04s; }
+.card:nth-child(3) { animation-delay: 0.08s; }
+.card:nth-child(4) { animation-delay: 0.12s; }
+.card:nth-child(5) { animation-delay: 0.16s; }
+.card:nth-child(6) { animation-delay: 0.2s; }
+@keyframes staggerIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* =========================================================================
+   TABLET BREAKPOINT
+   ========================================================================= */
 @media (min-width: 640px) {
   #app { max-width: 640px; margin: 0 auto; }
   .tab-bar { justify-content: center; }
@@ -1050,4 +1257,5 @@ body.flash::after {
   }
   .picker-dialog::before { display: none; }
   .picker-overlay { align-items: center; }
+  .session-meta-grid { grid-template-columns: repeat(4, 1fr); }
 }

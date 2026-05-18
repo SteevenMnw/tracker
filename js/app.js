@@ -60,21 +60,64 @@ const App = (() => {
     });
   }
 
+  // ======== Helpers ========
+  function timeAgo(dateStr) {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const days = Math.floor(diff / 86400000);
+    if (days === 0) return "Aujourd'hui";
+    if (days === 1) return 'Hier';
+    if (days < 7) return `Il y a ${days}j`;
+    if (days < 30) return `Il y a ${Math.floor(days / 7)} sem.`;
+    return `Il y a ${Math.floor(days / 30)} mois`;
+  }
+
+  function formatDuration(startISO, endISO) {
+    if (!startISO || !endISO) return null;
+    const ms = new Date(endISO) - new Date(startISO);
+    const mins = Math.round(ms / 60000);
+    if (mins < 60) return `${mins} min`;
+    return `${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}`;
+  }
+
   // ======== SÉANCES ========
   async function renderSessions() {
     const root = document.getElementById('screen-sessions');
     const allSessions = await Program.getAllSessions();
+    const workouts = (await DB.getAll('workouts')).filter(w => w.finished);
 
-    let html = `<h1 class="screen-title">Séances</h1>
-      <p class="muted small" style="margin-bottom:12px;">Choisis une séance ou crée la tienne.</p>`;
+    // Compute weekly count
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1));
+    weekStart.setHours(0, 0, 0, 0);
+    const thisWeekCount = workouts.filter(w => new Date(w.date) >= weekStart).length;
+    const totalCount = workouts.length;
+
+    let html = `
+      <h1 class="screen-title">Séances</h1>
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <span class="kpi-value">${thisWeekCount}</span>
+          <span class="kpi-label">Cette semaine</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">${totalCount}</span>
+          <span class="kpi-label">Total séances</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">${computeStreak(workouts)}</span>
+          <span class="kpi-label">Série (sem.)</span>
+        </div>
+      </div>
+    `;
 
     for (const [sid, session] of Object.entries(allSessions)) {
       const isCustom = sid.startsWith('custom_');
       const exCount = session.exercises.length;
       const avgRest = exCount ? Math.round(session.exercises.reduce((a, e) => a + (e.rest || 0), 0) / exCount) : 0;
       const restLabel = avgRest >= 60 ? Math.round(avgRest / 60) + ' min' : avgRest + 's';
+      const totalSets = session.exercises.reduce((a, e) => a + (e.sets || 0), 0);
 
-      // Muscles ciblés
       const muscleSet = new Set();
       session.exercises.forEach(ex => {
         const cat = Exercises.getCatalogExercise(ex.id);
@@ -83,23 +126,46 @@ const App = (() => {
       });
       const muscleLabels = [...muscleSet].slice(0, 5).map(m => Stats.MUSCLE_LABELS[m] || m);
 
+      const lastWorkout = workouts.filter(w => w.sessionId === sid).sort((a, b) => b.date.localeCompare(a.date))[0];
+      const lastStr = lastWorkout ? timeAgo(lastWorkout.date) : null;
+      const focusType = (session.focus || '').toLowerCase().includes('force') ? 'force' : 'volume';
+
       html += `
-        <div class="card session-card">
+        <div class="card session-card" data-stagger>
           <div class="session-card-head">
             <div>
+              <div class="session-title-row">
+                <span class="session-type-badge session-type-${focusType}">${focusType === 'force' ? '🏋️ Force' : '🔥 Volume'}</span>
+                ${isCustom ? `<button class="btn btn-tiny btn-ghost session-delete" data-sid="${sid}" title="Supprimer">🗑️</button>` : ''}
+              </div>
               <h2>${session.name}</h2>
-              <p class="muted small">${session.focus || ''}</p>
+              ${session.focus ? `<p class="muted small">${session.focus}</p>` : ''}
             </div>
-            ${isCustom ? `<button class="btn btn-tiny btn-ghost session-delete" data-sid="${sid}" title="Supprimer">🗑️</button>` : ''}
           </div>
           <div class="session-tags">
             ${muscleLabels.map(m => `<span class="tag">${m}</span>`).join('')}
           </div>
-          <div class="today-meta">
-            <span><strong>${exCount}</strong> exercices</span>
-            <span>Repos moy. <strong>${restLabel}</strong></span>
+          <div class="session-meta-grid">
+            <div class="session-meta-item">
+              <span class="session-meta-icon">📋</span>
+              <span><strong>${exCount}</strong> exos</span>
+            </div>
+            <div class="session-meta-item">
+              <span class="session-meta-icon">🔁</span>
+              <span><strong>${totalSets}</strong> sets</span>
+            </div>
+            <div class="session-meta-item">
+              <span class="session-meta-icon">⏱️</span>
+              <span>${restLabel} repos</span>
+            </div>
+            ${lastStr ? `<div class="session-meta-item">
+              <span class="session-meta-icon">📅</span>
+              <span>${lastStr}</span>
+            </div>` : ''}
           </div>
-          <button class="btn btn-primary btn-block session-start" data-sid="${sid}">Commencer</button>
+          <button class="btn btn-primary btn-block session-start" data-sid="${sid}">
+            Commencer la séance
+          </button>
         </div>
       `;
     }
@@ -113,13 +179,47 @@ const App = (() => {
     root.querySelectorAll('.session-delete').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (confirm('Supprimer cette séance custom ?')) {
-          await Program.deleteCustomSession(btn.dataset.sid);
+        if (confirm('Supprimer cette séance et tout son historique (sets, stats) ?')) {
+          const sid = btn.dataset.sid;
+          const ws = (await DB.getAll('workouts')).filter(w => w.sessionId === sid);
+          for (const w of ws) {
+            const sets = await DB.getByIndex('sets', 'workoutId', w.id);
+            for (const s of sets) await DB.del('sets', s.id);
+            await DB.del('workouts', w.id);
+          }
+          await Program.deleteCustomSession(sid);
           renderSessions();
         }
       });
     });
     document.getElementById('create-session-btn').addEventListener('click', () => openCreateSession());
+  }
+
+  function computeStreak(workouts) {
+    if (!workouts.length) return 0;
+    const weekSet = new Set();
+    for (const w of workouts) {
+      const d = new Date(w.date);
+      const monday = new Date(d);
+      const day = monday.getDay() || 7;
+      if (day !== 1) monday.setDate(monday.getDate() - (day - 1));
+      weekSet.add(monday.toISOString().slice(0, 10));
+    }
+    const sorted = [...weekSet].sort().reverse();
+    let streak = 0;
+    const now = new Date();
+    const curMonday = new Date(now);
+    const cd = curMonday.getDay() || 7;
+    if (cd !== 1) curMonday.setDate(curMonday.getDate() - (cd - 1));
+
+    for (let i = 0; i < 200; i++) {
+      const check = new Date(curMonday);
+      check.setDate(check.getDate() - i * 7);
+      const key = check.toISOString().slice(0, 10);
+      if (sorted.includes(key)) streak++;
+      else break;
+    }
+    return streak;
   }
 
   // ======== CRÉATION DE SÉANCE (catalogue) ========
@@ -262,7 +362,6 @@ const App = (() => {
           `;
         }
       }
-      // Customs sans catégorie standard
       const others = allExercises.filter(e => !Exercises.CATEGORIES.includes(e.category) && e.name.toLowerCase().includes(lower));
       if (others.length) {
         html += `<div class="picker-category">Autre</div>`;
@@ -270,7 +369,7 @@ const App = (() => {
           html += `<button type="button" class="picker-item" data-id="${ex.id}"><span class="picker-item-name">${ex.name}</span></button>`;
         }
       }
-      listEl.innerHTML = html || '<p class="muted small" style="padding:12px;">Aucun exercice trouvé.</p>';
+      listEl.innerHTML = html || '<div class="empty-state"><p class="empty-state-icon">🔍</p><p>Aucun exercice trouvé.</p></div>';
 
       listEl.querySelectorAll('.picker-item').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -354,28 +453,68 @@ const App = (() => {
     let html = '<h1 class="screen-title">Historique</h1>';
 
     if (!workouts.length) {
-      html += '<div class="card center"><p class="muted">Aucune séance enregistrée.</p></div>';
+      html += `<div class="empty-state-card">
+        <p class="empty-state-icon">📋</p>
+        <p class="empty-state-text">Aucune séance enregistrée</p>
+        <p class="empty-state-sub">Commence une séance pour la voir apparaître ici.</p>
+      </div>`;
       root.innerHTML = html;
       return;
     }
 
+    // Summary KPIs
+    const totalVol = workouts.reduce((a, w) => a + (w.totalVolume || 0), 0);
+    const totalSets = workouts.reduce((a, w) => a + (w.totalSets || 0), 0);
+    html += `
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <span class="kpi-value">${workouts.length}</span>
+          <span class="kpi-label">Séances</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">${totalSets}</span>
+          <span class="kpi-label">Sets totaux</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">${totalVol >= 1000 ? Math.round(totalVol / 1000) + 'T' : Math.round(totalVol)}</span>
+          <span class="kpi-label">Volume (kg)</span>
+        </div>
+      </div>
+    `;
+
+    // Group by date
+    let lastDateGroup = '';
     for (const w of workouts) {
       const d = new Date(w.date);
-      const dateStr = d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+      const dateGroup = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+      if (dateGroup !== lastDateGroup) {
+        html += `<div class="history-date-header">${dateGroup}</div>`;
+        lastDateGroup = dateGroup;
+      }
+
       const vol = w.totalVolume ? Math.round(w.totalVolume).toLocaleString('fr-FR') + ' kg' : '—';
+      const duration = formatDuration(w.date, w.finishedAt);
+      const maxVol = Math.max(...workouts.map(x => x.totalVolume || 0), 1);
+      const volPercent = Math.round(((w.totalVolume || 0) / maxVol) * 100);
+
       html += `
-        <div class="card history-card">
+        <div class="card history-card" data-stagger>
           <div class="history-card-head">
-            <div>
+            <div class="history-card-info">
               <h3>${w.sessionName || w.sessionId}</h3>
-              <p class="muted small">${dateStr} · ${w.totalSets || 0} sets · ${vol}</p>
+              <div class="history-card-stats">
+                <span class="history-stat">🔁 ${w.totalSets || 0} sets</span>
+                <span class="history-stat">🏋️ ${vol}</span>
+                ${duration ? `<span class="history-stat">⏱️ ${duration}</span>` : ''}
+              </div>
             </div>
             <div class="history-actions">
               <button class="btn btn-small btn-ghost history-view" data-wid="${w.id}">Détails</button>
               <button class="btn btn-tiny btn-ghost history-delete" data-wid="${w.id}">🗑️</button>
             </div>
           </div>
-          ${w.note ? `<p class="small muted" style="margin-top:6px;">${w.note}</p>` : ''}
+          <div class="history-vol-bar"><div class="history-vol-fill" style="width:${volPercent}%"></div></div>
+          ${w.note ? `<p class="small muted" style="margin-top:8px;font-style:italic;">${w.note}</p>` : ''}
         </div>
       `;
     }
@@ -403,7 +542,6 @@ const App = (() => {
     if (!workout) return;
     const sets = await DB.getByIndex('sets', 'workoutId', workoutId);
 
-    // Regroupe par exercice
     const byExercise = {};
     for (const s of sets) {
       if (!byExercise[s.exerciseId]) {
@@ -415,7 +553,6 @@ const App = (() => {
       byExercise[exId].sets.sort((a, b) => a.setIndex - b.setIndex);
     }
 
-    // Ordre des exercices : utilise l'ordre de la séance source si disponible
     let exerciseOrder = Object.keys(byExercise);
     const allSessions = await Program.getAllSessions();
     const session = allSessions[workout.sessionId];
@@ -436,13 +573,26 @@ const App = (() => {
     const d = new Date(workout.date);
     const dateStr = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const vol = workout.totalVolume ? Math.round(workout.totalVolume).toLocaleString('fr-FR') + ' kg' : '—';
+    const duration = formatDuration(workout.date, workout.finishedAt);
 
     let html = `
-      <h2>${workout.sessionName || workout.sessionId}</h2>
-      <p class="muted">${dateStr}</p>
-      <div class="today-meta" style="margin-bottom:16px;">
-        <span><strong>${sets.length}</strong> sets</span>
-        <span>Volume <strong>${vol}</strong></span>
+      <div class="detail-header">
+        <h2>${workout.sessionName || workout.sessionId}</h2>
+        <p class="muted small">${dateStr}</p>
+        <div class="kpi-row" style="margin-top:12px;">
+          <div class="kpi-card kpi-card-mini">
+            <span class="kpi-value">${sets.length}</span>
+            <span class="kpi-label">Sets</span>
+          </div>
+          <div class="kpi-card kpi-card-mini">
+            <span class="kpi-value">${vol}</span>
+            <span class="kpi-label">Volume</span>
+          </div>
+          ${duration ? `<div class="kpi-card kpi-card-mini">
+            <span class="kpi-value">${duration}</span>
+            <span class="kpi-label">Durée</span>
+          </div>` : ''}
+        </div>
       </div>
     `;
 
@@ -484,7 +634,6 @@ const App = (() => {
     root.innerHTML = html;
     modal.classList.add('open');
 
-    // Mini anatomy dans les headers
     root.querySelectorAll('.detail-anatomy-mini').forEach((el, i) => {
       const exId = exerciseOrder[i];
       const cat = Exercises.getCatalogExercise(exId);
@@ -545,6 +694,12 @@ const App = (() => {
   async function renderStats() {
     const root = document.getElementById('screen-stats');
     const recordedExercises = await Stats.getRecordedExercises();
+    const workouts = (await DB.getAll('workouts')).filter(w => w.finished);
+    const allSets = await DB.getAll('sets');
+
+    const totalVol = allSets.reduce((a, s) => a + (s.weight * s.reps), 0);
+    const prs = await Stats.getPRTable();
+    const bestPR = prs.length ? prs[0] : null;
 
     const exerciseButtons = recordedExercises.length
       ? recordedExercises.map(ex =>
@@ -553,34 +708,48 @@ const App = (() => {
       : '';
 
     root.innerHTML = `
-      <h1 class="screen-title">Stats</h1>
+      <h1 class="screen-title">Statistiques</h1>
+
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <span class="kpi-value">${workouts.length}</span>
+          <span class="kpi-label">Séances</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">${totalVol >= 1000 ? (totalVol / 1000).toFixed(1) + 'T' : Math.round(totalVol)}</span>
+          <span class="kpi-label">Volume total</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">${bestPR ? bestPR.estimate1RM : '—'}</span>
+          <span class="kpi-label">Meilleur 1RM</span>
+        </div>
+      </div>
 
       <section class="card">
-        <h3>Progression par exercice</h3>
-        <p class="muted small">Sélectionne un ou plusieurs exercices pour voir l'évolution de la charge moyenne (kg) par semaine.</p>
+        <h3>📈 Progression par exercice</h3>
+        <p class="muted small">Charge moyenne (kg) par semaine.</p>
         <div class="exercise-selector">${exerciseButtons}</div>
         <div class="chart-wrap" style="height:220px"><canvas id="chart-ex-prog"></canvas></div>
         <p id="ex-prog-empty" class="muted small">${recordedExercises.length ? 'Sélectionne au moins un exercice.' : 'Fais une séance pour voir tes stats.'}</p>
       </section>
 
       <section class="card">
-        <h3>Activité hebdomadaire</h3>
-        <p class="muted small">Séances effectuées par semaine. Survole pour voir les jours.</p>
+        <h3>📊 Activité hebdomadaire</h3>
         <div class="chart-wrap" style="height:200px"><canvas id="chart-activity"></canvas></div>
       </section>
 
       <section class="card">
-        <h3>Poids corporel</h3>
+        <h3>⚖️ Poids corporel</h3>
         <div class="chart-wrap" style="height:180px"><canvas id="chart-bodyweight"></canvas></div>
       </section>
 
       <section class="card">
-        <h3>Sommeil moyen hebdo</h3>
+        <h3>😴 Sommeil moyen hebdo</h3>
         <div class="chart-wrap" style="height:160px"><canvas id="chart-sleep"></canvas></div>
       </section>
 
       <section class="card">
-        <h3>Personal records</h3>
+        <h3>🏆 Personal Records</h3>
         <div id="pr-table"></div>
       </section>
     `;
@@ -661,7 +830,7 @@ const App = (() => {
         backgroundColor: color + 'cc',
         borderColor: color,
         borderWidth: 1,
-        borderRadius: 4,
+        borderRadius: 6,
       };
     });
 
@@ -702,7 +871,7 @@ const App = (() => {
       data: {
         datasets: [
           { label: 'Poids brut', data: raw, borderWidth: 1, pointRadius: 2, borderDash: [3, 3], borderColor: '#9a9aa3' },
-          { label: 'MA 7j', data: ma, borderWidth: 2.5, tension: 0.3, borderColor: '#0a84ff', pointRadius: 3 },
+          { label: 'MA 7j', data: ma, borderWidth: 2.5, tension: 0.3, borderColor: '#4a8eff', pointRadius: 3 },
         ],
       },
       options: chartOptions({ xType: 'time' }),
@@ -732,7 +901,7 @@ const App = (() => {
     });
     charts.sleep = new Chart(document.getElementById('chart-sleep'), {
       type: 'bar',
-      data: { labels: weeks, datasets: [{ label: 'h/nuit', data: avgs, backgroundColor: '#4bc0c0cc', borderRadius: 4 }] },
+      data: { labels: weeks, datasets: [{ label: 'h/nuit', data: avgs, backgroundColor: '#4bc0c0cc', borderRadius: 6 }] },
       options: chartOptions({}),
     });
   }
@@ -744,18 +913,18 @@ const App = (() => {
 
   function noDataMessage(canvasId) {
     const canvas = document.getElementById(canvasId);
-    if (canvas) canvas.replaceWith(Object.assign(document.createElement('p'),
-      { textContent: 'Pas encore de données.', className: 'muted small' }));
+    if (canvas) canvas.replaceWith(Object.assign(document.createElement('div'),
+      { innerHTML: '<div class="empty-state"><p class="empty-state-icon">📊</p><p>Pas encore de données.</p></div>', className: '' }).firstChild);
   }
 
   async function renderPRTable() {
     const root = document.getElementById('pr-table');
     const rows = await Stats.getPRTable();
-    if (!rows.length) { root.innerHTML = '<p class="muted small">Pas encore de PR.</p>'; return; }
+    if (!rows.length) { root.innerHTML = '<div class="empty-state"><p class="empty-state-icon">🏆</p><p>Pas encore de PR.</p></div>'; return; }
     root.innerHTML = `<table class="pr-table">
       <thead><tr><th>Exercice</th><th>Top</th><th>1RM est.</th><th>Date</th></tr></thead>
-      <tbody>${rows.map(r => `<tr>
-        <td>${r.name}</td>
+      <tbody>${rows.map((r, i) => `<tr>
+        <td>${i === 0 ? '🥇 ' : i === 1 ? '🥈 ' : i === 2 ? '🥉 ' : ''}${r.name}</td>
         <td>${r.bestWeight} × ${r.bestReps}</td>
         <td><strong>${r.estimate1RM} kg</strong></td>
         <td class="small muted">${r.date}</td>
@@ -768,19 +937,24 @@ const App = (() => {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { position: 'bottom', labels: { color: getCSSVar('--text'), padding: 12, usePointStyle: true } } },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color: getCSSVar('--text'), padding: 14, usePointStyle: true, font: { family: 'Outfit', size: 12 } }
+        }
+      },
       scales: {
         x: {
           type: 'category',
           stacked: !!stacked,
-          ticks: { color: getCSSVar('--text-muted'), maxRotation: 45, font: { size: 11 } },
-          grid: { color: getCSSVar('--border') + '44' },
+          ticks: { color: getCSSVar('--text-muted'), maxRotation: 45, font: { size: 11, family: 'Outfit' } },
+          grid: { color: getCSSVar('--border') + '33' },
         },
         y: {
           stacked: !!stacked,
           beginAtZero: true,
-          ticks: { color: getCSSVar('--text-muted') },
-          grid: { color: getCSSVar('--border') + '44' },
+          ticks: { color: getCSSVar('--text-muted'), font: { family: 'Outfit' } },
+          grid: { color: getCSSVar('--border') + '33' },
         },
       },
     };
@@ -793,9 +967,28 @@ const App = (() => {
   // ======== MENSURATIONS ========
   async function renderMeasurements() {
     const root = document.getElementById('screen-measurements');
+    const items = (await DB.getAll('measurements')).sort((a, b) => a.date.localeCompare(b.date));
+    const latest = items.length ? items[items.length - 1] : null;
+    const latestWeight = latest && latest.weight ? latest.weight + ' kg' : '—';
+    const latestSleep = latest && latest.sleep ? latest.sleep + 'h' : '—';
+
     root.innerHTML = `<h1 class="screen-title">Mensurations</h1>
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <span class="kpi-value">${latestWeight}</span>
+          <span class="kpi-label">Poids actuel</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">${latestSleep}</span>
+          <span class="kpi-label">Dernier sommeil</span>
+        </div>
+        <div class="kpi-card">
+          <span class="kpi-value">${items.length}</span>
+          <span class="kpi-label">Saisies</span>
+        </div>
+      </div>
       <section class="card">
-        <h3>Nouvelle saisie</h3>
+        <h3>📝 Nouvelle saisie</h3>
         <form id="measure-form" class="measure-form">
           <label>Date <input type="date" name="date" required></label>
           <label>Poids (kg) <input type="number" step="0.1" name="weight" inputmode="decimal"></label>
@@ -813,11 +1006,11 @@ const App = (() => {
         </form>
       </section>
       <section class="card">
-        <h3>Évolution</h3>
+        <h3>📐 Évolution</h3>
         <div id="measure-delta"></div>
       </section>
       <section class="card">
-        <h3>Historique</h3>
+        <h3>📋 Historique</h3>
         <div id="measure-history"></div>
       </section>
     `;
@@ -840,7 +1033,7 @@ const App = (() => {
   async function renderMeasurementDelta() {
     const root = document.getElementById('measure-delta');
     const items = (await DB.getAll('measurements')).sort((a, b) => a.date.localeCompare(b.date));
-    if (items.length < 2) { root.innerHTML = '<p class="muted small">Au moins 2 saisies nécessaires.</p>'; return; }
+    if (items.length < 2) { root.innerHTML = '<div class="empty-state"><p class="empty-state-icon">📐</p><p>Au moins 2 saisies nécessaires.</p></div>'; return; }
     const first = items[0], last = items[items.length - 1];
     const fields = [
       ['weight', 'Poids', 'kg'], ['armL', 'Bras G', 'cm'], ['armR', 'Bras D', 'cm'],
@@ -848,13 +1041,13 @@ const App = (() => {
       ['thighL', 'Cuisse G', 'cm'], ['thighR', 'Cuisse D', 'cm'],
       ['calfL', 'Mollet G', 'cm'], ['calfR', 'Mollet D', 'cm'],
     ];
-    let html = `<p class="small muted">Du ${first.date.slice(0,10)} au ${last.date.slice(0,10)}</p><table class="delta-table"><tbody>`;
+    let html = `<p class="small muted" style="margin-bottom:10px;">Du ${first.date.slice(0,10)} au ${last.date.slice(0,10)}</p><table class="delta-table"><tbody>`;
     for (const [k, label, u] of fields) {
       if (first[k] == null || last[k] == null) continue;
       const d = parseFloat(last[k]) - parseFloat(first[k]);
       const sign = d > 0 ? '+' : '';
       const cls = d > 0 ? 'up' : (d < 0 ? 'down' : '');
-      html += `<tr><td>${label}</td><td>${first[k]} → ${last[k]} ${u}</td><td class="delta ${cls}">${sign}${d.toFixed(1)}</td></tr>`;
+      html += `<tr><td>${label}</td><td class="muted">${first[k]} → ${last[k]} ${u}</td><td class="delta ${cls}">${sign}${d.toFixed(1)}</td></tr>`;
     }
     html += '</tbody></table>';
     root.innerHTML = html;
@@ -863,7 +1056,7 @@ const App = (() => {
   async function renderMeasurementHistory() {
     const root = document.getElementById('measure-history');
     const items = (await DB.getAll('measurements')).sort((a, b) => b.date.localeCompare(a.date));
-    if (!items.length) { root.innerHTML = '<p class="muted small">Aucune saisie.</p>'; return; }
+    if (!items.length) { root.innerHTML = '<div class="empty-state"><p class="empty-state-icon">📋</p><p>Aucune saisie.</p></div>'; return; }
     root.innerHTML = `<ul class="history-list">${items.map(m => `
       <li>
         <span><strong>${m.date.slice(0,10)}</strong> ·
@@ -889,27 +1082,30 @@ const App = (() => {
 
     root.innerHTML = `<h1 class="screen-title">Réglages</h1>
       <section class="card">
+        <h3>🎨 Apparence</h3>
         <label class="toggle-row"><span>Mode sombre</span>
           <input type="checkbox" id="set-theme" ${theme === 'dark' ? 'checked' : ''}></label>
-        <label class="toggle-row"><span>kg / cm</span>
+        <label class="toggle-row"><span>Unités : kg / cm</span>
           <input type="checkbox" id="set-units" ${units === 'metric' ? 'checked' : ''}></label>
       </section>
       <section class="card">
+        <h3>🔔 Notifications</h3>
         <label class="toggle-row"><span>Sons du timer</span>
           <input type="checkbox" id="set-sound" ${sound ? 'checked' : ''}></label>
         <label class="toggle-row"><span>Vibration</span>
           <input type="checkbox" id="set-vib" ${vibration ? 'checked' : ''}></label>
       </section>
       <section class="card">
-        <button class="btn btn-ghost btn-block" id="export">Exporter (JSON)</button>
+        <h3>💾 Données</h3>
+        <button class="btn btn-ghost btn-block" id="export">📤 Exporter (JSON)</button>
         <label class="btn btn-ghost btn-block" style="margin-top:8px;">
-          Importer (JSON)
+          📥 Importer (JSON)
           <input id="import" type="file" accept="application/json" hidden>
         </label>
-        <button class="btn btn-danger btn-block" id="reset" style="margin-top:8px;">Reset complet</button>
+        <button class="btn btn-danger btn-block" id="reset" style="margin-top:8px;">⚠️ Reset complet</button>
       </section>
       <section class="card center">
-        <p class="muted small">Tracker Muscu · 100% offline</p>
+        <p class="muted small">Tracker Muscu · 100% offline · v2.0</p>
       </section>
     `;
 
