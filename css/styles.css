@@ -662,7 +662,9 @@ body {
   letter-spacing: 0.04em;
 }
 .measure-form label.full { grid-column: 1 / -1; }
-.measure-form input {
+.measure-form input, .measure-form select {
+  width: 100%;
+  min-width: 0;
   font-size: 16px;
   font-family: inherit;
   font-weight: 600;
@@ -943,10 +945,38 @@ body.flash::after {
 .cs-muscle-tags { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
 .cs-row-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
-  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
-.cs-row-grid label { margin-bottom: 0; }
+.cs-row-grid label {
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  gap: 4px;
+}
+.cs-row-grid input {
+  width: 100%;
+  min-width: 0;
+  font-size: 15px;
+  font-family: inherit;
+  font-weight: 600;
+  padding: 10px 12px;
+  background: var(--bg-elev);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  -webkit-appearance: none;
+}
+.cs-row-grid input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--glow);
+}
 
 /* =========================================================================
    NEW EXERCISE FORM

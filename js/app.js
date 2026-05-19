@@ -181,11 +181,23 @@ const App = (() => {
         e.stopPropagation();
         if (confirm('Supprimer cette séance et tout son historique (sets, stats) ?')) {
           const sid = btn.dataset.sid;
+          const deletedExIds = new Set();
           const ws = (await DB.getAll('workouts')).filter(w => w.sessionId === sid);
           for (const w of ws) {
             const sets = await DB.getByIndex('sets', 'workoutId', w.id);
-            for (const s of sets) await DB.del('sets', s.id);
+            for (const s of sets) {
+              deletedExIds.add(s.exerciseId);
+              await DB.del('sets', s.id);
+            }
             await DB.del('workouts', w.id);
+          }
+          // Clean exercise_history for exercises that no longer have sets
+          const remainingSets = await DB.getAll('sets');
+          const activeExIds = new Set(remainingSets.map(s => s.exerciseId));
+          for (const exId of deletedExIds) {
+            if (!activeExIds.has(exId)) {
+              await DB.del('exercise_history', exId);
+            }
           }
           await Program.deleteCustomSession(sid);
           renderSessions();
