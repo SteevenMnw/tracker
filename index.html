@@ -89,6 +89,18 @@
     </div>
   </div>
 
+  <!-- Popup de confirmation -->
+  <div id="confirm-modal" class="modal-overlay" role="dialog" aria-modal="true">
+    <div class="dialog">
+      <h3 id="confirm-title">Confirmation</h3>
+      <p id="confirm-message" class="muted"></p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" id="confirm-no">Annuler</button>
+        <button class="btn btn-danger" id="confirm-yes">Supprimer</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Navigation onglets -->
   <nav class="tab-bar" role="navigation" aria-label="Navigation principale">
     <button class="tab-btn active" data-screen="sessions" aria-label="Séances">

@@ -2,6 +2,28 @@
 // app.js — Logique principale : routing, rendu des 5 onglets, init
 // ============================================================================
 
+function confirmDialog(message, { title = 'Confirmation', confirmLabel = 'Supprimer', danger = true } = {}) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('confirm-modal');
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').textContent = message;
+    const yesBtn = document.getElementById('confirm-yes');
+    yesBtn.textContent = confirmLabel;
+    yesBtn.className = danger ? 'btn btn-danger' : 'btn btn-primary';
+    modal.classList.add('open');
+    function cleanup(val) {
+      modal.classList.remove('open');
+      document.getElementById('confirm-yes').removeEventListener('click', onYes);
+      document.getElementById('confirm-no').removeEventListener('click', onNo);
+      resolve(val);
+    }
+    function onYes() { cleanup(true); }
+    function onNo() { cleanup(false); }
+    document.getElementById('confirm-yes').addEventListener('click', onYes);
+    document.getElementById('confirm-no').addEventListener('click', onNo);
+  });
+}
+
 const App = (() => {
   let charts = {};
 
@@ -51,7 +73,7 @@ const App = (() => {
     document.getElementById('timer-minus').addEventListener('click', () => Workout.adjustTimer(-15));
     document.getElementById('workout-abort').addEventListener('click', async () => {
       if (Workout.isActive()) {
-        if (confirm('Quitter la séance ? Les sets validés restent enregistrés.')) {
+        if (await confirmDialog('Les sets validés seront supprimés.', { title: 'Quitter la séance ?', confirmLabel: 'Quitter', danger: true })) {
           await Workout.abortSession();
         }
       } else {
@@ -179,7 +201,7 @@ const App = (() => {
     root.querySelectorAll('.session-delete').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (confirm('Supprimer cette séance et tout son historique (sets, stats) ?')) {
+        if (await confirmDialog('Cette séance et tout son historique (sets, stats) seront supprimés.', { title: 'Supprimer la séance ?' })) {
           const sid = btn.dataset.sid;
           const deletedExIds = new Set();
           const ws = (await DB.getAll('workouts')).filter(w => w.sessionId === sid);
@@ -538,7 +560,7 @@ const App = (() => {
     });
     root.querySelectorAll('.history-delete').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (confirm('Supprimer cette séance et tous ses sets ?')) {
+        if (await confirmDialog('Cette séance et tous ses sets seront supprimés.', { title: 'Supprimer de l\'historique ?' })) {
           const wid = parseInt(btn.dataset.wid);
           const sets = await DB.getByIndex('sets', 'workoutId', wid);
           const deletedExIds = new Set(sets.map(s => s.exerciseId));
@@ -684,7 +706,7 @@ const App = (() => {
 
     root.querySelectorAll('.edit-set-delete').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (confirm('Supprimer ce set ?')) {
+        if (await confirmDialog('Ce set sera définitivement supprimé.', { title: 'Supprimer ce set ?' })) {
           const row = btn.closest('.detail-set-row');
           await DB.del('sets', parseInt(row.dataset.setId));
           await recalcWorkoutVolume(workoutId);
@@ -1093,7 +1115,7 @@ const App = (() => {
         <button class="btn btn-tiny" data-del="${m.id}">✕</button>
       </li>`).join('')}</ul>`;
     root.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
-      if (confirm('Supprimer cette saisie ?')) {
+      if (await confirmDialog('Cette mesure sera définitivement supprimée.', { title: 'Supprimer cette saisie ?' })) {
         await DB.del('measurements', parseInt(b.dataset.del, 10));
         renderMeasurements();
       }
@@ -1234,7 +1256,7 @@ const App = (() => {
     document.getElementById('export').addEventListener('click', exportData);
     document.getElementById('import').addEventListener('change', importData);
     document.getElementById('reset').addEventListener('click', async () => {
-      if (confirm('Effacer TOUTES les données ? Action irréversible.')) {
+      if (await confirmDialog('Toutes tes données seront effacées. Cette action est irréversible.', { title: 'Reset complet ?', confirmLabel: 'Tout effacer' })) {
         await DB.resetAll();
         location.reload();
       }
@@ -1257,7 +1279,7 @@ const App = (() => {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      if (!confirm('Remplacer toutes les données actuelles ?')) return;
+      if (!await confirmDialog('Tes données actuelles seront remplacées.', { title: 'Importer ?', confirmLabel: 'Remplacer', danger: true })) return;
       await DB.importAll(data);
       alert('Import réussi.');
       location.reload();

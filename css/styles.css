@@ -754,8 +754,10 @@ body {
   box-shadow: 0 0 0 3px var(--glow);
 }
 #finish-modal textarea { resize: vertical; min-height: 76px; }
-#finish-modal .dialog-actions { display: flex; gap: 12px; margin-top: 20px; }
-#finish-modal .dialog-actions .btn { flex: 1; }
+.dialog-actions { display: flex; gap: 12px; margin-top: 20px; }
+.dialog-actions .btn { flex: 1; }
+.dialog h3 { margin: 0 0 8px; font-size: 18px; font-weight: 700; }
+.dialog p { margin: 0 0 4px; }
 
 /* ---- SR only ---- */
 .sr-only {
