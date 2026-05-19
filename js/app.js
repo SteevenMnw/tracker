@@ -541,8 +541,16 @@ const App = (() => {
         if (confirm('Supprimer cette séance et tous ses sets ?')) {
           const wid = parseInt(btn.dataset.wid);
           const sets = await DB.getByIndex('sets', 'workoutId', wid);
+          const deletedExIds = new Set(sets.map(s => s.exerciseId));
           for (const s of sets) await DB.del('sets', s.id);
           await DB.del('workouts', wid);
+          const remainingSets = await DB.getAll('sets');
+          const activeExIds = new Set(remainingSets.map(s => s.exerciseId));
+          for (const exId of deletedExIds) {
+            if (!activeExIds.has(exId)) {
+              await DB.del('exercise_history', exId);
+            }
+          }
           renderHistory();
         }
       });
@@ -1018,6 +1026,13 @@ const App = (() => {
         </form>
       </section>
       <section class="card">
+        <h3>📈 Courbes</h3>
+        <p class="muted small">Sélectionne une ou plusieurs mesures pour voir leur évolution.</p>
+        <div class="exercise-selector" id="measure-toggles"></div>
+        <div class="chart-wrap" style="height:220px"><canvas id="chart-measures"></canvas></div>
+        <p id="measure-chart-empty" class="muted small">Sélectionne au moins une mesure.</p>
+      </section>
+      <section class="card">
         <h3>📐 Évolution</h3>
         <div id="measure-delta"></div>
       </section>
@@ -1038,6 +1053,7 @@ const App = (() => {
       await DB.add('measurements', obj);
       renderMeasurements();
     });
+    await initMeasureChart(items);
     await renderMeasurementDelta();
     await renderMeasurementHistory();
   }
@@ -1082,6 +1098,88 @@ const App = (() => {
         renderMeasurements();
       }
     }));
+  }
+
+  const MEASURE_FIELDS = [
+    { key: 'weight', label: 'Poids (kg)', color: '#4a8eff' },
+    { key: 'sleep', label: 'Sommeil (h)', color: '#2dd47a' },
+    { key: 'armL', label: 'Bras G', color: '#ff6384' },
+    { key: 'armR', label: 'Bras D', color: '#ff9f40' },
+    { key: 'chest', label: 'Poitrine', color: '#9966ff' },
+    { key: 'waist', label: 'Taille', color: '#ffcd56' },
+    { key: 'thighL', label: 'Cuisse G', color: '#4bc0c0' },
+    { key: 'thighR', label: 'Cuisse D', color: '#36a2eb' },
+    { key: 'calfL', label: 'Mollet G', color: '#c9cbcf' },
+    { key: 'calfR', label: 'Mollet D', color: '#ff453a' },
+  ];
+
+  async function initMeasureChart(items) {
+    const togglesEl = document.getElementById('measure-toggles');
+    const emptyEl = document.getElementById('measure-chart-empty');
+
+    const availableFields = MEASURE_FIELDS.filter(f =>
+      items.some(m => m[f.key] != null && m[f.key] !== '')
+    );
+
+    if (!availableFields.length) {
+      togglesEl.innerHTML = '';
+      emptyEl.textContent = 'Enregistre des mesures pour voir les courbes.';
+      return;
+    }
+
+    togglesEl.innerHTML = availableFields.map(f =>
+      `<button type="button" class="exercise-toggle" data-field="${f.key}">${f.label}</button>`
+    ).join('');
+
+    const selectedFields = new Set();
+    togglesEl.querySelectorAll('.exercise-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.field;
+        if (selectedFields.has(key)) { selectedFields.delete(key); btn.classList.remove('active'); }
+        else { selectedFields.add(key); btn.classList.add('active'); }
+        renderMeasureChart(items, [...selectedFields], availableFields);
+      });
+    });
+  }
+
+  function renderMeasureChart(items, selectedKeys, availableFields) {
+    const emptyEl = document.getElementById('measure-chart-empty');
+    if (!selectedKeys.length) {
+      if (charts.measures) { charts.measures.destroy(); delete charts.measures; }
+      emptyEl.textContent = 'Sélectionne au moins une mesure.';
+      emptyEl.style.display = '';
+      return;
+    }
+    emptyEl.style.display = 'none';
+
+    const sorted = [...items].sort((a, b) => a.date.localeCompare(b.date));
+    const dates = [...new Set(sorted.map(m => m.date.slice(0, 10)))];
+
+    const datasets = selectedKeys.map(key => {
+      const field = availableFields.find(f => f.key === key);
+      const dataMap = {};
+      sorted.forEach(m => {
+        if (m[key] != null && m[key] !== '') dataMap[m.date.slice(0, 10)] = parseFloat(m[key]);
+      });
+      return {
+        label: field.label,
+        data: dates.map(d => dataMap[d] ?? null),
+        borderColor: field.color,
+        backgroundColor: field.color + '33',
+        borderWidth: 2.5,
+        tension: 0.3,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        spanGaps: true,
+      };
+    });
+
+    if (charts.measures) charts.measures.destroy();
+    charts.measures = new Chart(document.getElementById('chart-measures'), {
+      type: 'line',
+      data: { labels: dates, datasets },
+      options: chartOptions({}),
+    });
   }
 
   // ======== SETTINGS ========
