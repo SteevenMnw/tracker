@@ -89,6 +89,31 @@
     </div>
   </div>
 
+  <!-- Choix quitter séance -->
+  <div id="abort-choice-modal" class="modal-overlay" role="dialog" aria-modal="true">
+    <div class="dialog">
+      <h3>Quitter la séance ?</h3>
+      <p class="muted">Tes sets validés sont déjà enregistrés.</p>
+      <div class="dialog-actions-vertical">
+        <button class="btn btn-primary" id="abort-save">Reprendre plus tard</button>
+        <button class="btn btn-danger" id="abort-discard">Abandonner</button>
+        <button class="btn btn-ghost" id="abort-cancel">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bravo modal -->
+  <div id="bravo-modal" class="modal-overlay" role="dialog" aria-modal="true">
+    <div class="dialog" style="text-align:center;">
+      <h3 style="font-size:28px;">Bravo !</h3>
+      <p class="muted">Tous les sets sont complétés.</p>
+      <div class="dialog-actions">
+        <button class="btn btn-ghost" id="bravo-continue">Continuer</button>
+        <button class="btn btn-primary" id="bravo-finish">Terminer</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Popup de confirmation -->
   <div id="confirm-modal" class="modal-overlay" role="dialog" aria-modal="true">
     <div class="dialog">

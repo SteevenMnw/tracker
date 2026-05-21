@@ -24,6 +24,29 @@ function confirmDialog(message, { title = 'Confirmation', confirmLabel = 'Suppri
   });
 }
 
+function abortChoiceDialog() {
+  return new Promise(resolve => {
+    const modal = document.getElementById('abort-choice-modal');
+    modal.classList.add('open');
+    function cleanup(val) {
+      modal.classList.remove('open');
+      saveBtn.removeEventListener('click', onSave);
+      discardBtn.removeEventListener('click', onDiscard);
+      cancelBtn.removeEventListener('click', onCancel);
+      resolve(val);
+    }
+    const saveBtn = document.getElementById('abort-save');
+    const discardBtn = document.getElementById('abort-discard');
+    const cancelBtn = document.getElementById('abort-cancel');
+    function onSave() { cleanup('save'); }
+    function onDiscard() { cleanup('discard'); }
+    function onCancel() { cleanup('cancel'); }
+    saveBtn.addEventListener('click', onSave);
+    discardBtn.addEventListener('click', onDiscard);
+    cancelBtn.addEventListener('click', onCancel);
+  });
+}
+
 const App = (() => {
   let charts = {};
 
@@ -73,8 +96,13 @@ const App = (() => {
     document.getElementById('timer-minus').addEventListener('click', () => Workout.adjustTimer(-15));
     document.getElementById('workout-abort').addEventListener('click', async () => {
       if (Workout.isActive()) {
-        if (await confirmDialog('Les sets validés seront supprimés.', { title: 'Quitter la séance ?', confirmLabel: 'Quitter', danger: true })) {
+        const choice = await abortChoiceDialog();
+        if (choice === 'save') {
+          await Workout.pauseSession();
+          if (document.querySelector('#screen-history.active')) renderHistory();
+        } else if (choice === 'discard') {
           await Workout.abortSession();
+          if (document.querySelector('#screen-history.active')) renderHistory();
         }
       } else {
         document.getElementById('workout-modal').classList.remove('open');
@@ -480,19 +508,50 @@ const App = (() => {
   // ======== HISTORIQUE ========
   async function renderHistory() {
     const root = document.getElementById('screen-history');
-    const workouts = (await DB.getAll('workouts'))
-      .filter(w => w.finished)
+    const allWorkouts = (await DB.getAll('workouts'))
       .sort((a, b) => b.date.localeCompare(a.date));
+    const pendingWorkouts = allWorkouts.filter(w => !w.finished);
+    const workouts = allWorkouts.filter(w => w.finished);
 
     let html = '<h1 class="screen-title">Historique</h1>';
 
-    if (!workouts.length) {
+    // Séances en cours
+    if (pendingWorkouts.length) {
+      for (const pw of pendingWorkouts) {
+        const sets = await DB.getByIndex('sets', 'workoutId', pw.id);
+        html += `
+          <div class="card history-card pending-card" data-stagger>
+            <div class="history-card-head">
+              <div class="history-card-info">
+                <h3>${pw.sessionName || pw.sessionId} <span class="tag tag-small" style="background:var(--warning);color:#000;">En cours</span></h3>
+                <div class="history-card-stats">
+                  <span class="history-stat">🔁 ${sets.length} sets</span>
+                  <span class="history-stat">${timeAgo(pw.date)}</span>
+                </div>
+              </div>
+              <div class="history-actions">
+                <button class="btn btn-small btn-primary resume-workout" data-wid="${pw.id}">Reprendre</button>
+                <button class="btn btn-tiny btn-ghost history-delete" data-wid="${pw.id}">🗑️</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    if (!workouts.length && !pendingWorkouts.length) {
       html += `<div class="empty-state-card">
         <p class="empty-state-icon">📋</p>
         <p class="empty-state-text">Aucune séance enregistrée</p>
         <p class="empty-state-sub">Commence une séance pour la voir apparaître ici.</p>
       </div>`;
       root.innerHTML = html;
+      return;
+    }
+
+    if (!workouts.length) {
+      root.innerHTML = html;
+      bindHistoryListeners(root);
       return;
     }
 
@@ -554,25 +613,36 @@ const App = (() => {
     }
 
     root.innerHTML = html;
+    bindHistoryListeners(root);
+  }
 
+  async function deleteWorkoutFull(wid) {
+    const sets = await DB.getByIndex('sets', 'workoutId', wid);
+    const deletedExIds = new Set(sets.map(s => s.exerciseId));
+    for (const s of sets) await DB.del('sets', s.id);
+    await DB.del('workouts', wid);
+    const remainingSets = await DB.getAll('sets');
+    const activeExIds = new Set(remainingSets.map(s => s.exerciseId));
+    for (const exId of deletedExIds) {
+      if (!activeExIds.has(exId)) {
+        await DB.del('exercise_history', exId);
+      }
+    }
+  }
+
+  function bindHistoryListeners(root) {
+    root.querySelectorAll('.resume-workout').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await Workout.resumeSession(parseInt(btn.dataset.wid));
+      });
+    });
     root.querySelectorAll('.history-view').forEach(btn => {
       btn.addEventListener('click', () => openWorkoutDetail(parseInt(btn.dataset.wid)));
     });
     root.querySelectorAll('.history-delete').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (await confirmDialog('Cette séance et tous ses sets seront supprimés.', { title: 'Supprimer de l\'historique ?' })) {
-          const wid = parseInt(btn.dataset.wid);
-          const sets = await DB.getByIndex('sets', 'workoutId', wid);
-          const deletedExIds = new Set(sets.map(s => s.exerciseId));
-          for (const s of sets) await DB.del('sets', s.id);
-          await DB.del('workouts', wid);
-          const remainingSets = await DB.getAll('sets');
-          const activeExIds = new Set(remainingSets.map(s => s.exerciseId));
-          for (const exId of deletedExIds) {
-            if (!activeExIds.has(exId)) {
-              await DB.del('exercise_history', exId);
-            }
-          }
+          await deleteWorkoutFull(parseInt(btn.dataset.wid));
           renderHistory();
         }
       });
@@ -1237,7 +1307,7 @@ const App = (() => {
         <button class="btn btn-danger btn-block" id="reset" style="margin-top:8px;">⚠️ Reset complet</button>
       </section>
       <section class="card center">
-        <p class="muted small">Tracker Muscu · 100% offline · v2.0</p>
+        <p class="muted small">Tracker Muscu · 100% offline · v3.0</p>
       </section>
     `;
 

@@ -2,7 +2,7 @@
 // service-worker.js — Cache complet pour fonctionnement 100% offline
 // ============================================================================
 
-const CACHE_VERSION = 'tracker-v13';
+const CACHE_VERSION = 'tracker-v15';
 
 const ASSETS = [
   './',

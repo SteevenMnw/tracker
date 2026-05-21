@@ -151,7 +151,6 @@ const Workout = (() => {
     }
 
     updateProgressBar();
-    startTimer(ex.rest);
     return id;
   }
 
@@ -170,12 +169,63 @@ const Workout = (() => {
     current = null;
   }
 
+  async function resumeSession(workoutId) {
+    const workout = await DB.get('workouts', workoutId);
+    if (!workout || workout.finished) return;
+
+    const allSessions = await Program.getAllSessions();
+    const session = allSessions[workout.sessionId];
+    if (!session) return;
+
+    const overrides = await DB.getAll('program_overrides');
+    const ovMap = Object.fromEntries(overrides.map(o => [o.exerciseId, o]));
+
+    const exercises = session.exercises.map(ex => {
+      const ov = ovMap[ex.id] || {};
+      return {
+        ...ex,
+        rest: ov.rest ?? ex.rest,
+        name: ov.name ?? ex.name,
+      };
+    });
+
+    const existingSets = await DB.getByIndex('sets', 'workoutId', workoutId);
+
+    current = {
+      workoutId,
+      sessionId: workout.sessionId,
+      sessionName: workout.sessionName,
+      exercises,
+      startedAt: workout.date,
+      completedSets: existingSets.map(s => ({ ...s })),
+    };
+
+    renderWorkout();
+    openModal('workout-modal');
+  }
+
+  async function pauseSession() {
+    if (!current) return;
+    cancelTimer();
+    closeModal('workout-modal');
+    current = null;
+  }
+
   async function abortSession() {
     if (current && current.workoutId) {
-      for (const s of current.completedSets) {
+      const allSetsForWorkout = await DB.getByIndex('sets', 'workoutId', current.workoutId);
+      const deletedExIds = new Set(allSetsForWorkout.map(s => s.exerciseId));
+      for (const s of allSetsForWorkout) {
         await DB.del('sets', s.id);
       }
       await DB.del('workouts', current.workoutId);
+      const remainingSets = await DB.getAll('sets');
+      const activeExIds = new Set(remainingSets.map(s => s.exerciseId));
+      for (const exId of deletedExIds) {
+        if (!activeExIds.has(exId)) {
+          await DB.del('exercise_history', exId);
+        }
+      }
     }
     current = null;
     closeModal('workout-modal');
@@ -221,6 +271,8 @@ const Workout = (() => {
     finishBtn.textContent = 'Terminer la séance';
     finishBtn.addEventListener('click', () => promptFinish());
     root.appendChild(finishBtn);
+
+    updateProgressBar();
   }
 
   async function renderExerciseCard(ex, index) {
@@ -234,7 +286,9 @@ const Workout = (() => {
       ? renderLastSetsLine(lastSession.lastSets)
       : '<p class="muted small">Premier passage sur cet exercice.</p>';
 
-    const suggestion = computeSuggestion(ex, lastSession);
+    const hasPriorSession = lastSession && lastSession.lastSets &&
+      lastSession.lastSets[0] && lastSession.lastSets[0].workoutId !== current.workoutId;
+    const suggestion = hasPriorSession ? computeSuggestion(ex, lastSession) : null;
     const repsTarget = ex.isTime
       ? `${ex.repsMin}-${ex.repsMax} s`
       : `${ex.repsMin}-${ex.repsMax} reps`;
@@ -247,6 +301,11 @@ const Workout = (() => {
     const muscles = (ex.muscles && ex.muscles.length) ? ex.muscles : (cat ? cat.muscles : []);
     const hasMuscles = muscles && muscles.length > 0;
 
+    const muscleTags = muscles.map(m => {
+      const label = (typeof Stats !== 'undefined' && Stats.MUSCLE_LABELS?.[m]) || m;
+      return `<span class="muscle-tag">${label}</span>`;
+    }).join('');
+
     card.innerHTML = `
       <header class="exercise-head">
         <h3>${index + 1}. ${ex.name}${perSideLabel}</h3>
@@ -255,6 +314,7 @@ const Workout = (() => {
           <span>${ex.sets} × ${repsTarget}</span>
           <span>Repos ${formatRest(ex.rest)}</span>
         </div>
+        ${muscleTags ? `<div class="muscle-tags">${muscleTags}</div>` : ''}
         ${ex.note ? `<p class="exercise-note">${ex.note}</p>` : ''}
         <div class="exercise-actions">
           <a class="btn btn-ghost btn-small" href="${Exercises.buildYouTubeUrl(ex.name)}"
@@ -290,16 +350,29 @@ const Workout = (() => {
 
   function computeSuggestion(ex, lastSession) {
     if (!lastSession || !lastSession.lastSets || !lastSession.lastSets.length) return null;
-    const top = lastSession.lastSets[lastSession.lastSets.length - 1];
-    if (top.reps >= ex.repsMax) {
-      const increment = ex.isCompound ? 2.5 : 1.25;
-      const newWeight = Math.round((top.weight + increment) * 2) / 2;
-      return `Dernier : ${top.weight}kg × ${top.reps} → essaie <strong>${newWeight} kg</strong>`;
+    const sets = lastSession.lastSets;
+    const allSetsCompleted = sets.length >= ex.sets;
+    const allHitMax = sets.every(s => s.reps >= ex.repsMax);
+    const top = sets[sets.length - 1];
+
+    if (!allSetsCompleted) {
+      return `${sets.length}/${ex.sets} sets complétés — termine les ${ex.sets} sets avant de progresser.`;
+    }
+    if (allHitMax) {
+      const cat = Exercises.getCatalogExercise(ex.id);
+      const equip = cat?.equipment || 'barbell';
+      if (equip === 'bodyweight') {
+        return `Tous les sets au max (${ex.repsMax}) — augmente les reps ou ajoute du lest.`;
+      }
+      const increments = { barbell: 2.5, dumbbell: 2, cable: 2.5, machine: 2.5 };
+      const inc = increments[equip] || 2.5;
+      const newWeight = Math.round((top.weight + inc) * 2) / 2;
+      return `${sets.length} sets tous à ${ex.repsMax} reps → essaie <strong>${newWeight} kg</strong> (+${inc})`;
     }
     if (top.reps < ex.repsMin) {
       return `Reps en dessous de la cible — garde la charge et vise ${ex.repsMin}+ reps.`;
     }
-    return `Reste sur ${top.weight} kg, vise plus de reps.`;
+    return `Reste sur ${top.weight} kg, vise plus de reps (cible : ${ex.repsMax}).`;
   }
 
   function buildSetRow(ex, setIndex) {
@@ -315,7 +388,19 @@ const Workout = (() => {
     `;
     const btn = row.querySelector('.validate-set');
     const inputs = row.querySelectorAll('input');
-    let setRecordId = null;
+
+    const existing = current.completedSets.find(
+      s => s.exerciseId === ex.id && s.setIndex === setIndex
+    );
+    let setRecordId = existing ? existing.id : null;
+    if (existing) {
+      inputs[0].value = existing.weight;
+      inputs[1].value = existing.reps;
+      inputs.forEach(i => i.disabled = true);
+      row.classList.add('done');
+      btn.textContent = '✓ ok';
+    }
+
     btn.addEventListener('click', async () => {
       if (row.classList.contains('done')) {
         if (setRecordId) {
@@ -336,6 +421,12 @@ const Workout = (() => {
       row.classList.add('done');
       inputs.forEach(i => i.disabled = true);
       btn.textContent = '✓ ok';
+      const totalSets = current.exercises.reduce((a, e) => a + (e.sets || 0), 0);
+      if (current.completedSets.length >= totalSets) {
+        checkAllSetsCompleted();
+      } else {
+        startTimer(ex.rest);
+      }
     });
     return row;
   }
@@ -347,6 +438,31 @@ const Workout = (() => {
     return s ? `${m}'${s}` : `${m} min`;
   }
 
+  function checkAllSetsCompleted() {
+    if (!current) return;
+    const totalSets = current.exercises.reduce((a, e) => a + (e.sets || 0), 0);
+    if (current.completedSets.length >= totalSets) {
+      cancelTimer();
+      showBravoModal();
+    }
+  }
+
+  function showBravoModal() {
+    const modal = document.getElementById('bravo-modal');
+    modal.classList.add('open');
+    const contBtn = document.getElementById('bravo-continue');
+    const finBtn = document.getElementById('bravo-finish');
+    function cleanup() {
+      modal.classList.remove('open');
+      contBtn.removeEventListener('click', onContinue);
+      finBtn.removeEventListener('click', onFinish);
+    }
+    function onContinue() { cleanup(); }
+    function onFinish() { cleanup(); promptFinish(); }
+    contBtn.addEventListener('click', onContinue);
+    finBtn.addEventListener('click', onFinish);
+  }
+
   function promptFinish() {
     document.getElementById('finish-modal').classList.add('open');
   }
@@ -356,6 +472,8 @@ const Workout = (() => {
 
   return {
     startSession,
+    resumeSession,
+    pauseSession,
     finishSession,
     abortSession,
     startTimer,

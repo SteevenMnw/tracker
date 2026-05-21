@@ -380,10 +380,27 @@ body {
 /* =========================================================================
    SET ROWS — workout input
    ========================================================================= */
+.muscle-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.muscle-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--primary-dim);
+  color: var(--primary);
+  letter-spacing: 0.01em;
+}
+
 .set-row {
   display: grid;
-  grid-template-columns: 52px 1fr 1fr 48px;
-  gap: 8px;
+  grid-template-columns: 48px 1fr 1fr 44px;
+  gap: 6px;
   align-items: center;
   padding: 8px 0;
   border-bottom: 1px solid var(--border);
@@ -394,7 +411,8 @@ body {
 
 .set-row input[type="number"] {
   width: 100%;
-  padding: 12px 8px;
+  min-width: 0;
+  padding: 10px 6px;
   font-size: 16px;
   font-family: inherit;
   font-weight: 600;
@@ -539,9 +557,7 @@ body {
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
-  background: var(--glass-bg);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  background: var(--bg);
   z-index: 5;
 }
 .modal-bar h2 { margin: 0; font-size: 18px; font-weight: 700; }
@@ -593,6 +609,12 @@ body {
   gap: 14px;
   justify-content: center;
   margin-top: 24px;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.timer-controls .btn {
+  touch-action: manipulation;
 }
 
 .workout-header { margin-bottom: 20px; }
@@ -756,6 +778,8 @@ body {
 #finish-modal textarea { resize: vertical; min-height: 76px; }
 .dialog-actions { display: flex; gap: 12px; margin-top: 20px; }
 .dialog-actions .btn { flex: 1; }
+.dialog-actions-vertical { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+.dialog-actions-vertical .btn { width: 100%; }
 .dialog h3 { margin: 0 0 8px; font-size: 18px; font-weight: 700; }
 .dialog p { margin: 0 0 4px; }
 
