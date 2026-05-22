@@ -47,6 +47,20 @@ function abortChoiceDialog() {
   });
 }
 
+function showToast(message, duration = 2000) {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
 const App = (() => {
   let charts = {};
 
@@ -112,13 +126,19 @@ const App = (() => {
 
   // ======== Helpers ========
   function timeAgo(dateStr) {
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const days = Math.floor(diff / 86400000);
-    if (days === 0) return "Aujourd'hui";
-    if (days === 1) return 'Hier';
-    if (days < 7) return `Il y a ${days}j`;
-    if (days < 30) return `Il y a ${Math.floor(days / 7)} sem.`;
-    return `Il y a ${Math.floor(days / 30)} mois`;
+    const d = new Date(dateStr);
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    const dStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if (dStr === todayStr) return "Aujourd'hui";
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
+    if (dStr === yStr) return 'Hier';
+    const diff = Math.floor((now - d) / 86400000);
+    if (diff < 7) return `Il y a ${diff}j`;
+    if (diff < 30) return `Il y a ${Math.floor(diff / 7)} sem.`;
+    return `Il y a ${Math.floor(diff / 30)} mois`;
   }
 
   function formatDuration(startISO, endISO) {
@@ -1044,7 +1064,7 @@ const App = (() => {
     </table>`;
   }
 
-  function chartOptions({ xType, stacked } = {}) {
+  function chartOptions({ xType, stacked, beginAtZero = true } = {}) {
     return {
       responsive: true,
       maintainAspectRatio: false,
@@ -1064,7 +1084,7 @@ const App = (() => {
         },
         y: {
           stacked: !!stacked,
-          beginAtZero: true,
+          beginAtZero,
           ticks: { color: getCSSVar('--text-muted'), font: { family: 'Outfit' } },
           grid: { color: getCSSVar('--border') + '33' },
         },
@@ -1143,6 +1163,7 @@ const App = (() => {
         obj[k] = v === '' ? null : v;
       }
       await DB.add('measurements', obj);
+      showToast('Mesure enregistrée !');
       renderMeasurements();
     });
     await initMeasureChart(items);
@@ -1270,7 +1291,7 @@ const App = (() => {
     charts.measures = new Chart(document.getElementById('chart-measures'), {
       type: 'line',
       data: { labels: dates, datasets },
-      options: chartOptions({}),
+      options: chartOptions({ beginAtZero: false }),
     });
   }
 
@@ -1307,7 +1328,7 @@ const App = (() => {
         <button class="btn btn-danger btn-block" id="reset" style="margin-top:8px;">⚠️ Reset complet</button>
       </section>
       <section class="card center">
-        <p class="muted small">Tracker Muscu · 100% offline · v3.0</p>
+        <p class="muted small">Tracker Muscu · 100% offline · v3.1</p>
       </section>
     `;
 

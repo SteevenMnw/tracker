@@ -780,6 +780,30 @@ body {
 .dialog-actions .btn { flex: 1; }
 .dialog-actions-vertical { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
 .dialog-actions-vertical .btn { width: 100%; }
+
+/* Toast notification */
+.toast {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--success);
+  color: #fff;
+  padding: 12px 24px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  z-index: 500;
+  opacity: 0;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+.toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
 .dialog h3 { margin: 0 0 8px; font-size: 18px; font-weight: 700; }
 .dialog p { margin: 0 0 4px; }
 
